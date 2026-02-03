@@ -1,0 +1,17 @@
+[package]
+name = "ghost"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ghost-ui = { path = "./ghost-ui" }
+image = "0.24"
+log = "0.4"
+env_logger = "0.11"
+
+[[bin]]
+name = "ghost"
+path = "src/main.rs"
+
+[package.metadata.bundle.macos]
+LSUIElement = "1"

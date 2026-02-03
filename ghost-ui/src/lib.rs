@@ -1,0 +1,65 @@
+//! # ghost-ui
+//!
+//! A reusable crate for creating shaped transparent windows with wgpu.
+//!
+//! ## Features
+//! - Transparent, borderless windows
+//! - PNG skin support for custom window shapes
+//! - Cross-platform (macOS, Windows, Linux)
+//! - Always-on-top and click-through options
+//! - Draggable windows
+//! - Alpha-based hit testing (clicks on transparent areas pass through)
+//! - Focus-based opacity (opaque when focused, transparent when not)
+//! - System tray and dock icon helpers
+//!
+//! ## Example
+//!
+//! ```no_run
+//! use ghost_ui::{EventLoop, GhostWindowBuilder, icon, skin};
+//!
+//! fn main() {
+//!     let event_loop = EventLoop::new();
+//!
+//!     // Load skin data (can be done before window creation)
+//!     let skin_data = skin("assets/character.png").unwrap();
+//!
+//!     // Set up icons
+//!     let mut app_icon = icon("assets/icon.png").unwrap();
+//!     app_icon.setup_all().expect("Failed to setup icons");
+//!
+//!     // Create window
+//!     let window = GhostWindowBuilder::new()
+//!         .with_size(skin_data.width(), skin_data.height())
+//!         .with_always_on_top(true)
+//!         .with_draggable(true)
+//!         .with_skin_data(&skin_data)
+//!         .with_opacity_focused(1.0)    // Opaque when focused
+//!         .with_opacity_unfocused(0.5)  // Semi-transparent when unfocused
+//!         .build(&event_loop)
+//!         .expect("Failed to create window");
+//!
+//!     ghost_ui::run(window, event_loop);
+//! }
+//! ```
+
+pub mod icon;
+mod platform;
+mod renderer;
+mod skin;
+mod window;
+
+// Icon helpers
+pub use icon::{icon, icon_bytes, AppIcon, IconError};
+
+// Skin helpers
+pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
+
+// Renderer
+pub use renderer::{Renderer, RendererError};
+
+// Window
+pub use window::{run, GhostWindow, GhostWindowBuilder, WindowConfig, WindowError};
+
+// Re-export commonly used types
+pub use tao::event_loop::EventLoop;
+pub use tray_icon::menu::Menu as TrayMenu;
