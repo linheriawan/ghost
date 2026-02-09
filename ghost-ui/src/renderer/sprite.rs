@@ -55,7 +55,12 @@ const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct Uniforms {
     opacity: f32,
-    _padding: [f32; 3],
+    _padding: f32,
+    /// Skin offset in NDC (normalized device coordinates)
+    offset: [f32; 2],
+    /// Skin size as fraction of viewport (0.0 to 1.0)
+    size: [f32; 2],
+    _padding2: [f32; 2],
 }
 
 pub struct SpritePipeline {
@@ -98,10 +103,10 @@ impl SpritePipeline {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                // Uniforms
+                // Uniforms (used in both vertex and fragment shaders)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -174,7 +179,10 @@ impl SpritePipeline {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&[Uniforms {
                 opacity: 1.0,
-                _padding: [0.0; 3],
+                _padding: 0.0,
+                offset: [0.0, 0.0],
+                size: [1.0, 1.0],
+                _padding2: [0.0, 0.0],
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -202,11 +210,35 @@ impl SpritePipeline {
     }
 
     /// Prepare the pipeline for rendering with a specific skin.
-    pub fn prepare(&mut self, device: &Device, queue: &Queue, skin: &Skin, opacity: f32) {
+    ///
+    /// * `skin_offset` - Offset of skin within viewport [x, y] in pixels
+    /// * `viewport_size` - Size of the viewport [width, height] in pixels
+    pub fn prepare(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        skin: &Skin,
+        opacity: f32,
+        skin_offset: [f32; 2],
+        viewport_size: [f32; 2],
+    ) {
+        // Calculate skin size as fraction of viewport
+        let size_x = skin.width() as f32 / viewport_size[0];
+        let size_y = skin.height() as f32 / viewport_size[1];
+
+        // Calculate offset in NDC (-1 to 1 range)
+        // NDC x: -1 (left) to 1 (right)
+        // NDC y: -1 (bottom) to 1 (top)
+        let offset_x = (skin_offset[0] / viewport_size[0]) * 2.0 - 1.0 + size_x;
+        let offset_y = 1.0 - (skin_offset[1] / viewport_size[1]) * 2.0 - size_y;
+
         // Update uniforms
         let uniforms = Uniforms {
             opacity,
-            _padding: [0.0; 3],
+            _padding: 0.0,
+            offset: [offset_x, offset_y],
+            size: [size_x, size_y],
+            _padding2: [0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
 

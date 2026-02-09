@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use crate::widget::Widget;
+
 use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
     event::{ElementState, Event, MouseButton, WindowEvent},
@@ -117,6 +119,8 @@ struct WindowData {
     is_focused: bool,
     /// Current opacity (computed from focus state)
     current_opacity: f32,
+    /// Skin offset within the window [x, y] in pixels
+    skin_offset: [f32; 2],
 }
 
 /// A transparent, shaped window for ghost UI elements.
@@ -173,6 +177,7 @@ impl GhostWindow {
             original_skin_size: None,
             is_focused: false,
             current_opacity: initial_opacity,
+            skin_offset: [0.0, 0.0],
         });
 
         // Create renderer with a reference to the boxed window
@@ -262,6 +267,16 @@ impl GhostWindow {
         self.data.window.request_redraw();
     }
 
+    /// Set the skin offset within the window.
+    pub fn set_skin_offset(&mut self, offset: [f32; 2]) {
+        self.data.skin_offset = offset;
+    }
+
+    /// Get the skin offset within the window.
+    pub fn skin_offset(&self) -> [f32; 2] {
+        self.data.skin_offset
+    }
+
     /// Render the current frame.
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         if let Some(ref mut renderer) = self.renderer {
@@ -269,6 +284,64 @@ impl GhostWindow {
         } else {
             Ok(())
         }
+    }
+
+    /// Render with additional content (for widgets, etc.)
+    pub fn render_with_extra<F>(&mut self, extra: F) -> Result<(), wgpu::SurfaceError>
+    where
+        F: FnOnce(&mut wgpu::RenderPass<'_>),
+    {
+        if let Some(ref mut renderer) = self.renderer {
+            renderer.render_with_extra(
+                self.data.skin.as_ref(),
+                self.data.current_opacity,
+                self.data.skin_offset,
+                extra,
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Render with button widgets
+    pub fn render_with_buttons(
+        &mut self,
+        button_renderer: Option<&crate::renderer::ButtonRenderer>,
+    ) -> Result<(), wgpu::SurfaceError> {
+        if let Some(ref mut renderer) = self.renderer {
+            renderer.render_with_buttons(
+                self.data.skin.as_ref(),
+                self.data.current_opacity,
+                self.data.skin_offset,
+                button_renderer,
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Render with button widgets and app's custom rendering
+    pub fn render_with_buttons_and_app<A: GhostApp>(
+        &mut self,
+        button_renderer: Option<&crate::renderer::ButtonRenderer>,
+        app: &A,
+    ) -> Result<(), wgpu::SurfaceError> {
+        if let Some(ref mut renderer) = self.renderer {
+            renderer.render_with_buttons_and_app(
+                self.data.skin.as_ref(),
+                self.data.current_opacity,
+                self.data.skin_offset,
+                button_renderer,
+                app,
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Get the current cursor position (in screen coordinates)
+    pub fn cursor_position(&self) -> Option<PhysicalPosition<f64>> {
+        self.data.cursor_position
     }
 
     /// Handle focus change.
@@ -458,6 +531,258 @@ impl GhostWindow {
     }
 }
 
+/// Events that can be emitted by the ghost window
+#[derive(Debug, Clone)]
+pub enum GhostEvent {
+    /// A button was clicked
+    ButtonClicked(crate::widget::ButtonId),
+    /// Window was focused or unfocused
+    FocusChanged(bool),
+    /// Window was resized
+    Resized(u32, u32),
+    /// Frame update (for animations)
+    Update(f32), // delta time in seconds
+}
+
+/// GPU resources for app initialization
+pub struct GpuResources<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub format: wgpu::TextureFormat,
+}
+
+/// Application trait for handling ghost window events
+pub trait GhostApp {
+    /// Called once when GPU resources are available (for initializing renderers)
+    fn init_gpu(&mut self, _gpu: GpuResources<'_>) {}
+
+    /// Called when an event occurs
+    fn on_event(&mut self, event: GhostEvent);
+
+    /// Called before rendering, return buttons to render
+    fn buttons(&self) -> Vec<&crate::widget::Button> {
+        Vec::new()
+    }
+
+    /// Called to update button states (for hover effects, etc.)
+    fn buttons_mut(&mut self) -> Vec<&mut crate::widget::Button> {
+        Vec::new()
+    }
+
+    /// Called before rendering to prepare GPU resources (callouts, etc.)
+    /// scale_factor is the display's DPI scale (1.0 for standard, 2.0 for Retina)
+    fn prepare(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _viewport: [f32; 2], _scale_factor: f32) {}
+
+    /// Called during rendering to add extra rendering (callouts, etc.)
+    fn render<'a>(&'a self, _render_pass: &mut wgpu::RenderPass<'a>) {}
+}
+
+/// Run the ghost window event loop with custom event handling.
+///
+/// This takes ownership of the GhostWindow and runs until the window is closed.
+pub fn run_with_app<A: GhostApp + 'static>(
+    mut ghost_window: GhostWindow,
+    event_loop: EventLoop<()>,
+    mut app: A,
+) {
+    use std::time::Instant;
+
+    let mut last_frame = Instant::now();
+    let mut button_renderer: Option<crate::renderer::ButtonRenderer> = None;
+    let mut gpu_initialized = false;
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
+        let window_size = ghost_window.window().inner_size();
+        let window_height = window_size.height as f32;
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::Focused(focused),
+                ..
+            } => {
+                ghost_window.handle_focus(focused);
+                app.on_event(GhostEvent::FocusChanged(focused));
+                ghost_window.request_redraw();
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                ghost_window.handle_cursor_moved(position);
+
+                // Update button hover states
+                let cursor_x = position.x as f32;
+                let cursor_y = position.y as f32;
+                for button in app.buttons_mut() {
+                    button.update_hover(cursor_x, cursor_y, window_height);
+                }
+
+                ghost_window.request_redraw();
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::CursorLeft { .. },
+                ..
+            } => {
+                ghost_window.handle_cursor_left();
+
+                // Reset button states
+                for button in app.buttons_mut() {
+                    button.update_hover(-1.0, -1.0, window_height);
+                }
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                },
+                ..
+            } => {
+                if let Some(cursor_pos) = ghost_window.cursor_position() {
+                    let cursor_x = cursor_pos.x as f32;
+                    let cursor_y = cursor_pos.y as f32;
+
+                    // Check if any button was pressed
+                    let mut button_pressed = false;
+                    for button in app.buttons_mut() {
+                        if button.handle_press(cursor_x, cursor_y, window_height) {
+                            button_pressed = true;
+                            break;
+                        }
+                    }
+
+                    if !button_pressed && ghost_window.should_handle_click() && ghost_window.is_draggable() {
+                        ghost_window.drag();
+                    }
+
+                    ghost_window.request_redraw();
+                }
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: MouseButton::Left,
+                    ..
+                },
+                ..
+            } => {
+                if let Some(cursor_pos) = ghost_window.cursor_position() {
+                    let cursor_x = cursor_pos.x as f32;
+                    let cursor_y = cursor_pos.y as f32;
+
+                    // Check if any button was released (clicked) - collect IDs first
+                    let clicked_ids: Vec<_> = app
+                        .buttons_mut()
+                        .iter_mut()
+                        .filter_map(|button| {
+                            if button.handle_release(cursor_x, cursor_y, window_height) {
+                                Some(button.id())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    // Then emit events
+                    for id in clicked_ids {
+                        app.on_event(GhostEvent::ButtonClicked(id));
+                    }
+
+                    ghost_window.request_redraw();
+                }
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                ghost_window.handle_resize(size.width, size.height);
+                app.on_event(GhostEvent::Resized(size.width, size.height));
+            }
+
+            Event::MainEventsCleared => {
+                let now = Instant::now();
+                let delta = now.duration_since(last_frame).as_secs_f32();
+                last_frame = now;
+
+                app.on_event(GhostEvent::Update(delta));
+                ghost_window.request_redraw();
+            }
+
+            Event::RedrawRequested(_) => {
+                // Initialize GPU resources if needed
+                if !gpu_initialized {
+                    if let Some(ref renderer) = ghost_window.renderer {
+                        // Initialize button renderer
+                        button_renderer = Some(crate::renderer::ButtonRenderer::new(
+                            renderer.device(),
+                            renderer.format(),
+                        ));
+
+                        // Let app initialize its GPU resources
+                        app.init_gpu(GpuResources {
+                            device: renderer.device(),
+                            queue: renderer.queue(),
+                            format: renderer.format(),
+                        });
+
+                        gpu_initialized = true;
+                    }
+                }
+
+                // Prepare buttons for rendering
+                let viewport = [window_size.width as f32, window_size.height as f32];
+                if let (Some(ref mut btn_renderer), Some(ref renderer)) =
+                    (&mut button_renderer, &ghost_window.renderer)
+                {
+                    let buttons: Vec<&crate::widget::Button> = app.buttons();
+                    btn_renderer.prepare(renderer.device(), renderer.queue(), &buttons, viewport);
+                }
+
+                // Let app prepare its rendering (callouts, etc.)
+                if let Some(ref renderer) = ghost_window.renderer {
+                    let scale_factor = ghost_window.window().scale_factor() as f32;
+                    app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor);
+                }
+
+                // Render with buttons and app's extra rendering
+                let render_result = ghost_window.render_with_buttons_and_app(
+                    button_renderer.as_ref(),
+                    &app,
+                );
+                if let Err(e) = render_result {
+                    log::error!("Render error: {:?}", e);
+                    match e {
+                        wgpu::SurfaceError::Lost => {
+                            let size = ghost_window.window().inner_size();
+                            ghost_window.handle_resize(size.width, size.height);
+                        }
+                        wgpu::SurfaceError::OutOfMemory => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+
+            _ => (),
+        }
+    });
+}
+
 /// Run the ghost window event loop.
 ///
 /// This takes ownership of the GhostWindow and runs until the window is closed.
@@ -544,6 +869,7 @@ pub fn run(mut ghost_window: GhostWindow, event_loop: EventLoop<()>) {
 pub struct GhostWindowBuilder {
     config: WindowConfig,
     skin_bytes: Option<Vec<u8>>,
+    skin_offset: [f32; 2],
 }
 
 impl GhostWindowBuilder {
@@ -552,7 +878,15 @@ impl GhostWindowBuilder {
         Self {
             config: WindowConfig::default(),
             skin_bytes: None,
+            skin_offset: [0.0, 0.0],
         }
+    }
+
+    /// Set the skin offset within the window.
+    /// This is used when the window is larger than the skin to accommodate callouts.
+    pub fn with_skin_offset(mut self, offset: [f32; 2]) -> Self {
+        self.skin_offset = offset;
+        self
     }
 
     /// Set the window size. Will be automatically clamped to GPU limits.
@@ -652,6 +986,9 @@ impl GhostWindowBuilder {
         if let Some(bytes) = self.skin_bytes {
             window.load_skin_from_bytes(&bytes)?;
         }
+
+        // Set skin offset
+        window.set_skin_offset(self.skin_offset);
 
         Ok(window)
     }

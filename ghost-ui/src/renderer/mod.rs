@@ -1,7 +1,9 @@
 //! wgpu-based renderer for ghost windows
 
+mod button;
 mod sprite;
 
+pub use button::ButtonRenderer;
 pub use sprite::SpritePipeline;
 
 use tao::window::Window;
@@ -145,10 +147,32 @@ impl<'window> Renderer<'window> {
 
     /// Render a skin to the window.
     pub fn render(&mut self, skin: Option<&Skin>, opacity: f32) -> Result<(), wgpu::SurfaceError> {
+        self.render_with_extra(skin, opacity, [0.0, 0.0], |_| {})
+    }
+
+    /// Render a skin to the window with additional content.
+    pub fn render_with_extra<F>(
+        &mut self,
+        skin: Option<&Skin>,
+        opacity: f32,
+        skin_offset: [f32; 2],
+        extra: F,
+    ) -> Result<(), wgpu::SurfaceError>
+    where
+        F: FnOnce(&mut wgpu::RenderPass<'_>),
+    {
+        let viewport_size = [self.config.width as f32, self.config.height as f32];
+
         // Prepare sprite pipeline if we have a skin
         if let Some(skin) = skin {
-            self.sprite_pipeline
-                .prepare(&self.device, &self.queue, skin, opacity);
+            self.sprite_pipeline.prepare(
+                &self.device,
+                &self.queue,
+                skin,
+                opacity,
+                skin_offset,
+                viewport_size,
+            );
         }
 
         let output = self.surface.get_current_texture()?;
@@ -181,6 +205,74 @@ impl<'window> Renderer<'window> {
             if skin.is_some() {
                 self.sprite_pipeline.render(&mut render_pass);
             }
+
+            // Render additional content (buttons, widgets, etc.)
+            extra(&mut render_pass);
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        Ok(())
+    }
+
+    /// Render a skin with button widgets.
+    pub fn render_with_buttons(
+        &mut self,
+        skin: Option<&Skin>,
+        opacity: f32,
+        skin_offset: [f32; 2],
+        button_renderer: Option<&ButtonRenderer>,
+    ) -> Result<(), wgpu::SurfaceError> {
+        let viewport_size = [self.config.width as f32, self.config.height as f32];
+
+        // Prepare sprite pipeline if we have a skin
+        if let Some(skin) = skin {
+            self.sprite_pipeline.prepare(
+                &self.device,
+                &self.queue,
+                skin,
+                opacity,
+                skin_offset,
+                viewport_size,
+            );
+        }
+
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            if skin.is_some() {
+                self.sprite_pipeline.render(&mut render_pass);
+            }
+
+            // Render buttons
+            if let Some(btn_renderer) = button_renderer {
+                btn_renderer.render(&mut render_pass);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -192,6 +284,75 @@ impl<'window> Renderer<'window> {
     /// Get the surface texture format.
     pub fn format(&self) -> TextureFormat {
         self.config.format
+    }
+
+    /// Render a skin with button widgets and app's custom rendering.
+    pub fn render_with_buttons_and_app<'a, A: crate::GhostApp>(
+        &'a mut self,
+        skin: Option<&Skin>,
+        opacity: f32,
+        skin_offset: [f32; 2],
+        button_renderer: Option<&'a ButtonRenderer>,
+        app: &'a A,
+    ) -> Result<(), wgpu::SurfaceError> {
+        let viewport_size = [self.config.width as f32, self.config.height as f32];
+
+        // Prepare sprite pipeline if we have a skin
+        if let Some(skin) = skin {
+            self.sprite_pipeline.prepare(
+                &self.device,
+                &self.queue,
+                skin,
+                opacity,
+                skin_offset,
+                viewport_size,
+            );
+        }
+
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            if skin.is_some() {
+                self.sprite_pipeline.render(&mut render_pass);
+            }
+
+            // Render buttons
+            if let Some(btn_renderer) = button_renderer {
+                btn_renderer.render(&mut render_pass);
+            }
+
+            // App's custom rendering (callouts, etc.)
+            app.render(&mut render_pass);
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        Ok(())
     }
 }
 

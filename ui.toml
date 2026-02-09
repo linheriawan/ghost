@@ -1,0 +1,67 @@
+# Ghost UI Configuration
+
+[skin]
+# Path to the background/character image
+path = "assets/tania.png"
+
+[callout]
+# Anchor point relative to skin: "top-left", "top-center", "top-right",
+#                                 "center-left", "center-center", "center-right",
+#                                 "bottom-left", "bottom-center", "bottom-right"
+#
+# How it works:
+# - The anchor specifies which point of the SKIN image to position from
+# - "top-right" means: start from top-right corner of the skin
+# - Then apply offset from that point
+anchor = "top-right"
+
+# Offset from anchor point [x, y] in pixels
+# For "top-right" anchor:
+#   - Positive x = further right (outside skin)
+#   - Negative y = above the anchor point
+offset = [-100.0, 300.0]
+
+# Maximum width of callout bubble
+max_width = 500.0
+
+# Font size (standard OS size is around 13-14, callouts typically 14-18)
+font_size = 24.0
+
+# Text animation: "instant", "typewriter", "word-by-word", "stream"
+animation = "typewriter"
+
+# Characters per second for typewriter/stream animation
+animation_speed = 30.0
+
+# How long callout stays visible in seconds (0 = until next message)
+duration = 5.0
+
+# Style
+[callout.style]
+background = [1.0, 1.0, 1.0, 0.95]  # RGBA
+text_color = [0.1, 0.1, 0.1, 1.0]   # RGBA
+padding = 14.0
+border_radius = 10.0
+
+# Button definitions
+# Position uses bottom-left origin (0,0 = bottom-left of skin)
+[[buttons]]
+id = "greet"
+label = "Greet"
+position = [10.0, 10.0]
+size = [60.0, 28.0]
+style = "primary"  # "primary", "default", "light"
+
+[[buttons]]
+id = "think"
+label = "Think"
+position = [80.0, 10.0]
+size = [60.0, 28.0]
+style = "default"
+
+[[buttons]]
+id = "scream"
+label = "Scream"
+position = [150.0, 10.0]
+size = [60.0, 28.0]
+style = "light"

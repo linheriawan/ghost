@@ -46,6 +46,7 @@ pub mod icon;
 mod platform;
 mod renderer;
 mod skin;
+pub mod widget;
 mod window;
 
 // Icon helpers
@@ -55,10 +56,13 @@ pub use icon::{icon, icon_bytes, AppIcon, IconError};
 pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
 
 // Renderer
-pub use renderer::{Renderer, RendererError};
+pub use renderer::{ButtonRenderer, Renderer, RendererError};
 
 // Window
-pub use window::{run, GhostWindow, GhostWindowBuilder, WindowConfig, WindowError};
+pub use window::{run, run_with_app, GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError};
+
+// Widget system
+pub use widget::{Button, ButtonId, ButtonState, ButtonStyle, Origin, Widget};
 
 // Re-export commonly used types
 pub use tao::event_loop::EventLoop;

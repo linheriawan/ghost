@@ -10,10 +10,24 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
 }
 
+struct Uniforms {
+    opacity: f32,
+    _padding: f32,
+    offset: vec2<f32>,
+    size: vec2<f32>,
+}
+@group(0) @binding(2)
+var<uniform> uniforms: Uniforms;
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = vec4<f32>(in.position, 0.0, 1.0);
+
+    // Transform position from full-screen quad (-1 to 1) to offset/sized quad
+    // Input position is -1 to 1, we scale it to size and offset it
+    let scaled_pos = in.position * uniforms.size + uniforms.offset;
+
+    out.clip_position = vec4<f32>(scaled_pos, 0.0, 1.0);
     out.tex_coords = in.tex_coords;
     return out;
 }
@@ -22,12 +36,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 var t_diffuse: texture_2d<f32>;
 @group(0) @binding(1)
 var s_diffuse: sampler;
-
-struct Uniforms {
-    opacity: f32,
-}
-@group(0) @binding(2)
-var<uniform> uniforms: Uniforms;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {

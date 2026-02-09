@@ -3,11 +3,18 @@ name = "ghost"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["ghost-ui", "ghost-callout"]
+
 [dependencies]
 ghost-ui = { path = "./ghost-ui" }
+ghost-callout = { path = "./ghost-callout" }
+wgpu = "0.19"
 image = "0.24"
 log = "0.4"
 env_logger = "0.11"
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
 
 [[bin]]
 name = "ghost"
