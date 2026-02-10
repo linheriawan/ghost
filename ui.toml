@@ -2,7 +2,7 @@
 
 [skin]
 # Path to the background/character image
-path = "assets/tania.png"
+path = "assets/jin-ai_g.png"
 
 [callout]
 # Anchor point relative to skin: "top-left", "top-center", "top-right",
@@ -19,7 +19,7 @@ anchor = "top-right"
 # For "top-right" anchor:
 #   - Positive x = further right (outside skin)
 #   - Negative y = above the anchor point
-offset = [-100.0, 300.0]
+offset = [0.0, 0.0]
 
 # Maximum width of callout bubble
 max_width = 500.0
@@ -65,3 +65,13 @@ label = "Scream"
 position = [150.0, 10.0]
 size = [60.0, 28.0]
 style = "light"
+
+# Layer overlays - images rendered on top of the main skin
+[[layers]]
+path = "assets/name_plate.png"
+anchor = "bottom-center"  # Where to position relative to skin
+offset = [0.0, 10.0]       # Offset from anchor [x, y]
+text = "Xiao Mei"            # Text to display centered on the layer
+text_color = [0.2, 0.2, 0.2, 1.0]  # RGBA
+font_size = 24.0
+z_order = 0               # Higher values render on top

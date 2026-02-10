@@ -4,22 +4,35 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// Root configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub skin: SkinConfig,
     pub callout: CalloutConfig,
     #[serde(default)]
     pub buttons: Vec<ButtonConfig>,
+    #[serde(default)]
+    pub layers: Vec<LayerConfig>,
 }
 
 /// Skin/background configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SkinConfig {
+    /// Path to the skin image or animation directory
     pub path: String,
+    /// Whether this is an animated skin (directory of frames)
+    #[serde(default)]
+    pub animated: bool,
+    /// Frames per second for animated skins
+    #[serde(default = "default_skin_fps")]
+    pub fps: f32,
+}
+
+fn default_skin_fps() -> f32 {
+    24.0
 }
 
 /// Callout configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CalloutConfig {
     /// Anchor point: "top-left", "top-center", "top-right", etc.
     pub anchor: String,
@@ -58,7 +71,7 @@ fn default_duration() -> f32 {
 }
 
 /// Callout style configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CalloutStyleConfig {
     #[serde(default = "default_background")]
     pub background: [f32; 4],
@@ -95,7 +108,7 @@ fn default_border_radius() -> f32 {
 }
 
 /// Button configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ButtonConfig {
     pub id: String,
     pub label: String,
@@ -104,6 +117,42 @@ pub struct ButtonConfig {
     pub size: [f32; 2],
     #[serde(default = "default_button_style")]
     pub style: String,
+}
+
+/// Layer configuration for overlay images
+#[derive(Debug, Clone, Deserialize)]
+pub struct LayerConfig {
+    /// Path to the layer image
+    pub path: String,
+    /// Anchor point: "top-left", "bottom-center", etc.
+    #[serde(default = "default_layer_anchor")]
+    pub anchor: String,
+    /// Offset from anchor [x, y] in pixels
+    #[serde(default)]
+    pub offset: [f32; 2],
+    /// Optional text to display on the layer
+    pub text: Option<String>,
+    /// Text color [r, g, b, a]
+    #[serde(default = "default_layer_text_color")]
+    pub text_color: [f32; 4],
+    /// Font size for text
+    #[serde(default = "default_layer_font_size")]
+    pub font_size: f32,
+    /// Z-order (higher = rendered on top)
+    #[serde(default)]
+    pub z_order: i32,
+}
+
+fn default_layer_anchor() -> String {
+    "bottom-center".to_string()
+}
+
+fn default_layer_text_color() -> [f32; 4] {
+    [1.0, 1.0, 1.0, 1.0]
+}
+
+fn default_layer_font_size() -> f32 {
+    16.0
 }
 
 fn default_button_size() -> [f32; 2] {

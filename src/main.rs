@@ -2,6 +2,7 @@
 
 mod actions;
 mod app;
+mod callout_app;
 mod config;
 mod ui;
 
@@ -15,7 +16,6 @@ fn main() {
     let config = config::Config::load_default().unwrap_or_else(|e| {
         log::error!("Failed to load ui.toml: {}", e);
         log::info!("Using default configuration");
-        // Provide a sensible default
         panic!("Please create ui.toml configuration file");
     });
 
@@ -38,14 +38,18 @@ fn main() {
         panic!("Could not load skin image");
     });
 
-    // --- 4. CALCULATE WINDOW LAYOUT ---
-    // Window needs to be larger than skin to accommodate callout
-    let layout = config.calculate_window_layout(skin_data.width(), skin_data.height());
+    // --- 4. CREATE CALLOUT CHANNEL ---
+    let (callout_sender, callout_receiver) = callout_app::create_callout_channel();
 
-    // --- 5. CREATE GHOST WINDOW ---
-    let window = GhostWindowBuilder::new()
-        .with_size(layout.window_width, layout.window_height)
-        .with_skin_offset(layout.skin_offset)
+    // --- 5. CALCULATE CALLOUT WINDOW POSITION AND SIZE ---
+    let callout_offset = callout_app::calculate_callout_offset(&config, skin_data.width(), skin_data.height());
+    let callout_size = callout_app::calculate_callout_size(&config);
+
+    log::info!("Callout offset: {:?}, size: {:?}", callout_offset, callout_size);
+
+    // --- 6. CREATE MAIN GHOST WINDOW ---
+    let main_window = GhostWindowBuilder::new()
+        .with_size(skin_data.width(), skin_data.height())
         .with_always_on_top(true)
         .with_draggable(true)
         .with_click_through(false)
@@ -55,14 +59,34 @@ fn main() {
         .with_title("Ghost")
         .with_skin_data(&skin_data)
         .build(&event_loop)
-        .expect("Failed to create ghost window");
+        .expect("Failed to create main window");
 
-    // --- 6. CREATE APP FROM CONFIG ---
-    // Pass skin offset so app can position callout relative to skin
-    let app = app::App::new(config, skin_data.width(), skin_data.height(), layout.skin_offset);
+    // --- 7. CREATE CALLOUT WINDOW ---
+    let callout_window = GhostWindowBuilder::new()
+        .with_size(callout_size.0, callout_size.1)
+        .with_always_on_top(true)
+        .with_draggable(false) // Callout follows main window
+        .with_click_through(true) // Clicks pass through
+        .with_alpha_hit_test(false)
+        .with_opacity_focused(1.0)
+        .with_opacity_unfocused(1.0)
+        .with_title("Ghost Callout")
+        .build(&event_loop)
+        .expect("Failed to create callout window");
 
-    log::info!("Ghost app started");
+    // --- 8. CREATE APPS ---
+    let main_app = app::App::new(config.clone(), skin_data.width(), skin_data.height(), callout_sender);
+    let callout_window_app = callout_app::CalloutWindowApp::new(&config, callout_receiver);
 
-    // Run with custom app handler
-    ghost_ui::run_with_app(window, event_loop, app);
+    log::info!("Ghost app started with linked callout window");
+
+    // Run with linked callout window
+    ghost_ui::run_with_app_and_callout(
+        main_window,
+        callout_window,
+        callout_offset,
+        event_loop,
+        main_app,
+        callout_window_app,
+    );
 }

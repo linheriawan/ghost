@@ -293,7 +293,7 @@ impl<'window> Renderer<'window> {
         opacity: f32,
         skin_offset: [f32; 2],
         button_renderer: Option<&'a ButtonRenderer>,
-        app: &'a A,
+        app: &'a mut A,
     ) -> Result<(), wgpu::SurfaceError> {
         let viewport_size = [self.config.width as f32, self.config.height as f32];
 
@@ -340,12 +340,53 @@ impl<'window> Renderer<'window> {
                 self.sprite_pipeline.render(&mut render_pass);
             }
 
+            // Render layers and text overlays (after skin, before buttons)
+            app.render_layers(&self.device, &self.queue, viewport_size, &mut render_pass);
+
             // Render buttons
             if let Some(btn_renderer) = button_renderer {
                 btn_renderer.render(&mut render_pass);
             }
+        }
 
-            // App's custom rendering (callouts, etc.)
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        Ok(())
+    }
+
+    /// Render a transparent window with callout app content (no skin).
+    pub fn render_callout<'a, C: crate::CalloutApp>(
+        &'a mut self,
+        app: &'a C,
+    ) -> Result<(), wgpu::SurfaceError> {
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Callout Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Callout Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
             app.render(&mut render_pass);
         }
 

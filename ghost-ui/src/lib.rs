@@ -42,7 +42,9 @@
 //! }
 //! ```
 
+pub mod animated_skin;
 pub mod icon;
+pub mod layer;
 mod platform;
 mod renderer;
 mod skin;
@@ -55,11 +57,21 @@ pub use icon::{icon, icon_bytes, AppIcon, IconError};
 // Skin helpers
 pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
 
+// Animated skin
+pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PlayMode};
+
 // Renderer
-pub use renderer::{ButtonRenderer, Renderer, RendererError};
+pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline};
+
+// Layer system
+pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer};
 
 // Window
-pub use window::{run, run_with_app, GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError};
+pub use window::{
+    run, run_with_app, run_with_app_and_callout,
+    CalloutApp, CalloutWindowConfig,
+    GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
+};
 
 // Widget system
 pub use widget::{Button, ButtonId, ButtonState, ButtonStyle, Origin, Widget};

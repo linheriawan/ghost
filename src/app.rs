@@ -1,179 +1,96 @@
 //! Application state - combines UI and business logic
 
-use ghost_callout::{ArrowPosition, Callout, CalloutStyle, ShapeRenderer, TextAnimation, TextRenderer};
-use ghost_ui::{Button, GhostApp, GhostEvent, GpuResources};
-use std::time::Duration;
+use ghost_ui::{Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor, LayerConfig, LayerRenderer, SpritePipeline};
+use wgpu::TextureFormat;
 
-use crate::actions;
-use crate::config::{Anchor, Config};
+use crate::callout_app::{CalloutCommand, CalloutSender};
+use crate::config::Config;
 use crate::ui;
 
 /// Main application state
 pub struct App {
     config: Config,
     buttons: Vec<Button>,
-    callout: Callout,
+    callout_sender: CalloutSender,
     skin_size: (u32, u32),
-    /// Skin offset within the window (for expanded windows that accommodate callouts)
-    skin_offset: [f32; 2],
-    // GPU renderers (initialized lazily)
-    shape_renderer: Option<ShapeRenderer>,
-    text_renderer: Option<TextRenderer>,
+    layers: Vec<Layer>,
+    layer_renderer: LayerRenderer,
+    layer_pipeline: Option<SpritePipeline>,
+    texture_format: Option<TextureFormat>,
 }
 
 impl App {
     /// Create new app from configuration
-    /// skin_offset is the position of the skin within the window (for expanded windows)
-    pub fn new(config: Config, skin_width: u32, skin_height: u32, skin_offset: [f32; 2]) -> Self {
+    pub fn new(
+        config: Config,
+        skin_width: u32,
+        skin_height: u32,
+        callout_sender: CalloutSender,
+    ) -> Self {
         let buttons = ui::create_buttons_from_config(&config.buttons);
-        let callout = Self::create_callout_from_config(&config, skin_width, skin_height, skin_offset);
+
+        // Load layers from config
+        let mut layers = Vec::new();
+        for layer_config in &config.layers {
+            let ghost_config = LayerConfig {
+                anchor: LayerAnchor::from_str(&layer_config.anchor),
+                offset: layer_config.offset,
+                text: layer_config.text.clone(),
+                text_color: layer_config.text_color,
+                font_size: layer_config.font_size,
+                z_order: layer_config.z_order,
+            };
+
+            match Layer::from_path(&layer_config.path, ghost_config) {
+                Ok(mut layer) => {
+                    layer.calculate_position(skin_width, skin_height);
+                    log::info!("Loaded layer: {} at position {:?}", layer_config.path, layer.position());
+                    layers.push(layer);
+                }
+                Err(e) => {
+                    log::error!("Failed to load layer '{}': {}", layer_config.path, e);
+                }
+            }
+        }
+
+        // Sort layers by z_order
+        layers.sort_by_key(|l| l.config.z_order);
 
         Self {
             config,
             buttons,
-            callout,
+            callout_sender,
             skin_size: (skin_width, skin_height),
-            skin_offset,
-            shape_renderer: None,
-            text_renderer: None,
+            layers,
+            layer_renderer: LayerRenderer::new(),
+            layer_pipeline: None,
+            texture_format: None,
         }
     }
 
-    /// Create callout from configuration
-    fn create_callout_from_config(
-        config: &Config,
-        skin_width: u32,
-        skin_height: u32,
-        skin_offset: [f32; 2],
-    ) -> Callout {
-        let anchor = Anchor::from_str(&config.callout.anchor);
-        let (mut position, arrow) = Self::calculate_position(
-            anchor,
-            config.callout.offset,
-            config.callout.max_width,
-            skin_width as f32,
-            skin_height as f32,
-        );
-
-        // Add skin offset to position (callout position is relative to skin, not window)
-        position[0] += skin_offset[0];
-        position[1] += skin_offset[1];
-
-        // Create style with configured font size
-        let style = CalloutStyle {
-            background: config.callout.style.background,
-            text_color: config.callout.style.text_color,
-            font_size: config.callout.font_size,
-            padding: config.callout.style.padding,
-            border_radius: config.callout.style.border_radius,
-            ..Default::default()
-        };
-
-        // Parse animation
-        let animation = match config.callout.animation.as_str() {
-            "instant" => TextAnimation::Instant,
-            "word-by-word" | "wordbyword" => TextAnimation::WordByWord {
-                wps: config.callout.animation_speed,
-            },
-            "stream" => TextAnimation::Stream {
-                cps: config.callout.animation_speed,
-            },
-            _ => TextAnimation::Typewriter {
-                cps: config.callout.animation_speed,
-            },
-        };
-
-        let mut callout = Callout::new()
-            .with_position(position[0], position[1])
-            .with_arrow(arrow)
-            .with_max_width(config.callout.max_width)
-            .with_text_animation(animation)
-            .with_style(style);
-
-        if config.callout.duration > 0.0 {
-            callout = callout.with_duration(Duration::from_secs_f32(config.callout.duration));
+    /// Send a callout command
+    fn send_callout(&self, cmd: CalloutCommand) {
+        if let Err(e) = self.callout_sender.send(cmd) {
+            log::error!("Failed to send callout command: {}", e);
         }
-
-        callout
-    }
-
-    /// Calculate callout position based on anchor
-    ///
-    /// The anchor specifies which point of the SKIN the callout is positioned relative to.
-    /// For example:
-    /// - TopRight: Callout appears near the top-right corner of the skin
-    /// - CenterLeft: Callout appears to the left of the skin, vertically centered
-    ///
-    /// The offset is then applied from this anchor point.
-    fn calculate_position(
-        anchor: Anchor,
-        offset: [f32; 2],
-        _callout_width: f32,
-        skin_width: f32,
-        skin_height: f32,
-    ) -> ([f32; 2], ArrowPosition) {
-        let (anchor_x, anchor_y) = anchor.as_fraction();
-
-        // Calculate base position from anchor
-        let base_x = skin_width * anchor_x;
-        let base_y = skin_height * anchor_y;
-
-        // Apply offset
-        let x = base_x + offset[0];
-        let y = base_y + offset[1];
-
-        // Determine arrow position based on anchor
-        let arrow = match anchor {
-            // Top anchors - arrow points down toward skin
-            Anchor::TopLeft => ArrowPosition::Bottom(0.2),
-            Anchor::TopCenter => ArrowPosition::Bottom(0.5),
-            Anchor::TopRight => ArrowPosition::Bottom(0.8),
-
-            // Center anchors - arrow points horizontally toward skin
-            Anchor::CenterLeft => ArrowPosition::Right(0.5),
-            Anchor::CenterCenter => ArrowPosition::Bottom(0.5),
-            Anchor::CenterRight => ArrowPosition::Left(0.5),
-
-            // Bottom anchors - arrow points up toward skin
-            Anchor::BottomLeft => ArrowPosition::Top(0.2),
-            Anchor::BottomCenter => ArrowPosition::Top(0.5),
-            Anchor::BottomRight => ArrowPosition::Top(0.8),
-        };
-
-        ([x, y], arrow)
-    }
-
-    /// Get reference to config
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    /// Update callout position (e.g., after window resize)
-    fn update_callout_position(&mut self) {
-        let anchor = Anchor::from_str(&self.config.callout.anchor);
-        let (position, _arrow) = Self::calculate_position(
-            anchor,
-            self.config.callout.offset,
-            self.config.callout.max_width,
-            self.skin_size.0 as f32,
-            self.skin_size.1 as f32,
-        );
-        // Add skin offset to position
-        self.callout.set_position(
-            position[0] + self.skin_offset[0],
-            position[1] + self.skin_offset[1],
-        );
     }
 }
 
 impl GhostApp for App {
     fn init_gpu(&mut self, gpu: GpuResources<'_>) {
-        log::info!("Initializing GPU resources for callout rendering");
-        self.shape_renderer = Some(ShapeRenderer::new(gpu.device, gpu.format));
-        self.text_renderer = Some(TextRenderer::new(gpu.device, gpu.queue, gpu.format));
+        log::info!("Main window GPU initialized");
 
-        // Initialize callout with GPU resources
-        self.callout.init(gpu.device, gpu.queue, gpu.format);
+        // Initialize layer GPU resources
+        for layer in &mut self.layers {
+            layer.init_gpu(gpu.device, gpu.queue);
+        }
+
+        // Create sprite pipeline for layers
+        self.layer_pipeline = Some(SpritePipeline::new(gpu.device, gpu.format));
+        self.texture_format = Some(gpu.format);
+
+        // Initialize layer text renderer
+        self.layer_renderer.init_gpu(gpu.device, gpu.queue, gpu.format);
     }
 
     fn on_event(&mut self, event: GhostEvent) {
@@ -182,17 +99,38 @@ impl GhostApp for App {
                 // Find which button was clicked by ID
                 for btn_config in &self.config.buttons {
                     if ui::get_button_id(&btn_config.id) == id {
-                        actions::on_button_click(&btn_config.id, &mut self.callout);
+                        // Send command to callout window based on button ID
+                        match btn_config.id.as_str() {
+                            "greet" => {
+                                self.send_callout(CalloutCommand::Say("Hi, how are you today?".to_string()));
+                                log::info!("Action: Greeting");
+                            }
+                            "think" => {
+                                self.send_callout(CalloutCommand::Think("Hmm, let me think about that...".to_string()));
+                                log::info!("Action: Thinking");
+                            }
+                            "scream" => {
+                                self.send_callout(CalloutCommand::Scream("WATCH OUT!".to_string()));
+                                log::info!("Action: Screaming");
+                            }
+                            _ => {
+                                self.send_callout(CalloutCommand::Say(format!("Button '{}' clicked!", btn_config.id)));
+                                log::info!("Action: Unknown button '{}'", btn_config.id);
+                            }
+                        }
                         break;
                     }
                 }
             }
-            GhostEvent::Update(delta) => {
-                self.callout.update(delta);
-            }
             GhostEvent::Resized(width, height) => {
                 self.skin_size = (width, height);
-                self.update_callout_position();
+                // Recalculate layer positions
+                for layer in &mut self.layers {
+                    layer.calculate_position(width, height);
+                }
+            }
+            GhostEvent::Moved(_x, _y) => {
+                // Main window moved - callout window position is updated by the event loop
             }
             _ => {}
         }
@@ -207,16 +145,38 @@ impl GhostApp for App {
     }
 
     fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, viewport: [f32; 2], scale_factor: f32) {
-        // Prepare callout for rendering
-        if self.callout.is_visible() {
-            self.callout.prepare(device, queue, viewport, scale_factor);
+        // Prepare layer bind groups
+        if let Some(pipeline) = &self.layer_pipeline {
+            for layer in &mut self.layers {
+                layer.prepare(pipeline, device, queue, viewport, scale_factor);
+            }
+        }
+
+        // Prepare layer text rendering
+        for layer in &self.layers {
+            if layer.text().is_some() {
+                self.layer_renderer.prepare_text(device, queue, layer, viewport, scale_factor);
+            }
         }
     }
 
-    fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        // Render callout if visible
-        if self.callout.is_visible() {
-            self.callout.render(render_pass);
+    fn render_layers<'a>(
+        &'a mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _viewport: [f32; 2],
+        render_pass: &mut wgpu::RenderPass<'a>,
+    ) {
+        // Render layer images
+        if let Some(pipeline) = &self.layer_pipeline {
+            for layer in &self.layers {
+                if let Some(bind_group) = layer.bind_group() {
+                    pipeline.render_bind_group(render_pass, bind_group);
+                }
+            }
         }
+
+        // Render layer text
+        self.layer_renderer.render_text(render_pass);
     }
 }

@@ -220,17 +220,22 @@ impl SpritePipeline {
         skin: &Skin,
         opacity: f32,
         skin_offset: [f32; 2],
-        viewport_size: [f32; 2],
+        _viewport_size: [f32; 2],
     ) {
-        // Calculate skin size as fraction of viewport
-        let size_x = skin.width() as f32 / viewport_size[0];
-        let size_y = skin.height() as f32 / viewport_size[1];
-
-        // Calculate offset in NDC (-1 to 1 range)
-        // NDC x: -1 (left) to 1 (right)
-        // NDC y: -1 (bottom) to 1 (top)
-        let offset_x = (skin_offset[0] / viewport_size[0]) * 2.0 - 1.0 + size_x;
-        let offset_y = 1.0 - (skin_offset[1] / viewport_size[1]) * 2.0 - size_y;
+        // When skin_offset is [0,0], render full-screen (skin fills viewport)
+        // This handles DPI scaling correctly since the window is sized to the skin
+        let (size_x, size_y, offset_x, offset_y) = if skin_offset[0] == 0.0 && skin_offset[1] == 0.0 {
+            // Full-screen: size=1.0, offset=0.0 (same as original behavior)
+            (1.0, 1.0, 0.0, 0.0)
+        } else {
+            // Offset rendering: calculate NDC coordinates
+            // Note: This path needs the viewport to be in the same coordinate space as skin_offset
+            let size_x = skin.width() as f32 / _viewport_size[0];
+            let size_y = skin.height() as f32 / _viewport_size[1];
+            let offset_x = (skin_offset[0] / _viewport_size[0]) * 2.0 - 1.0 + size_x;
+            let offset_y = 1.0 - (skin_offset[1] / _viewport_size[1]) * 2.0 - size_y;
+            (size_x, size_y, offset_x, offset_y)
+        };
 
         // Update uniforms
         let uniforms = Uniforms {
@@ -274,5 +279,94 @@ impl SpritePipeline {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..6, 0, 0..1);
         }
+    }
+
+    /// Prepare to render a sprite at a specific pixel position within the viewport.
+    ///
+    /// * `position` - Position [x, y] in pixels from top-left of viewport
+    /// * `viewport_size` - Size of the viewport [width, height] in pixels
+    pub fn prepare_at_position(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        skin: &Skin,
+        opacity: f32,
+        position: [f32; 2],
+        viewport_size: [f32; 2],
+    ) {
+        self.current_bind_group = Some(self.create_bind_group_at_position(
+            device, queue, skin, opacity, position, viewport_size, 1.0,
+        ));
+    }
+
+    /// Create a bind group for rendering a sprite at a specific position.
+    /// This is useful for layers that need their own bind groups.
+    pub fn create_bind_group_at_position(
+        &self,
+        device: &Device,
+        _queue: &Queue,
+        skin: &Skin,
+        opacity: f32,
+        position: [f32; 2],
+        viewport_size: [f32; 2],
+        scale_factor: f32,
+    ) -> BindGroup {
+        // Scale the skin dimensions for physical pixels
+        let skin_width = skin.width() as f32 * scale_factor;
+        let skin_height = skin.height() as f32 * scale_factor;
+
+        // Calculate sprite size as fraction of viewport
+        let size_x = skin_width / viewport_size[0];
+        let size_y = skin_height / viewport_size[1];
+
+        // Convert pixel position to NDC
+        // NDC goes from -1 (left/bottom) to +1 (right/top)
+        // Pixel coordinates go from 0 (top-left) with Y increasing downward
+
+        // Calculate the center of the sprite in NDC
+        let center_x = (position[0] + skin_width / 2.0) / viewport_size[0] * 2.0 - 1.0;
+        let center_y = 1.0 - (position[1] + skin_height / 2.0) / viewport_size[1] * 2.0;
+
+        // Create a uniform buffer for this specific layer
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Layer Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[Uniforms {
+                opacity,
+                _padding: 0.0,
+                offset: [center_x, center_y],
+                size: [size_x, size_y],
+                _padding2: [0.0, 0.0],
+            }]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group for this skin
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Layer Bind Group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(skin.texture_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    /// Render a bind group (for layers)
+    pub fn render_bind_group<'a>(&'a self, render_pass: &mut RenderPass<'a>, bind_group: &'a BindGroup) {
+        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_bind_group(0, bind_group, &[]);
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        render_pass.draw_indexed(0..6, 0, 0..1);
     }
 }
