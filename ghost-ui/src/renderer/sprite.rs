@@ -301,6 +301,7 @@ impl SpritePipeline {
 
     /// Create a bind group for rendering a sprite at a specific position.
     /// This is useful for layers that need their own bind groups.
+    /// If size_override is provided, it will be used instead of the skin's actual dimensions.
     pub fn create_bind_group_at_position(
         &self,
         device: &Device,
@@ -311,9 +312,32 @@ impl SpritePipeline {
         viewport_size: [f32; 2],
         scale_factor: f32,
     ) -> BindGroup {
-        // Scale the skin dimensions for physical pixels
-        let skin_width = skin.width() as f32 * scale_factor;
-        let skin_height = skin.height() as f32 * scale_factor;
+        self.create_bind_group_at_position_with_size(
+            device, _queue, skin, opacity, position, viewport_size, scale_factor, None,
+        )
+    }
+
+    /// Create a bind group with optional size override.
+    pub fn create_bind_group_at_position_with_size(
+        &self,
+        device: &Device,
+        _queue: &Queue,
+        skin: &Skin,
+        opacity: f32,
+        position: [f32; 2],
+        viewport_size: [f32; 2],
+        scale_factor: f32,
+        size_override: Option<[f32; 2]>,
+    ) -> BindGroup {
+        // Use size override if provided, otherwise use skin dimensions
+        let (base_width, base_height) = match size_override {
+            Some([w, h]) => (w, h),
+            None => (skin.width() as f32, skin.height() as f32),
+        };
+
+        // Scale dimensions for physical pixels
+        let skin_width = base_width * scale_factor;
+        let skin_height = base_height * scale_factor;
 
         // Calculate sprite size as fraction of viewport
         let size_x = skin_width / viewport_size[0];

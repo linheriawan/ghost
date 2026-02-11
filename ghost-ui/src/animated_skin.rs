@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use wgpu::{Device, Queue, Texture, TextureView};
+use wgpu::{Device, Queue};
 
 use crate::skin::{Skin, SkinData, SkinError};
 
@@ -59,7 +59,7 @@ impl Animation {
         }
 
         if frames.is_empty() {
-            return Err(SkinError::IoError(format!(
+            return Err(SkinError::NotFound(format!(
                 "No frames found in directory: {}",
                 dir.display()
             )));
@@ -73,7 +73,7 @@ impl Animation {
         );
 
         Ok(Self {
-            textures: vec![None; frames.len()],
+            textures: (0..frames.len()).map(|_| None).collect(),
             frames,
             fps,
             play_mode: PlayMode::Loop,
@@ -274,7 +274,7 @@ impl AnimatedSkin {
         }
 
         if skin.animations.is_empty() {
-            return Err(SkinError::IoError(format!(
+            return Err(SkinError::NotFound(format!(
                 "No animations found in: {}",
                 base_dir.display()
             )));

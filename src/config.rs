@@ -9,9 +9,113 @@ pub struct Config {
     pub skin: SkinConfig,
     pub callout: CalloutConfig,
     #[serde(default)]
+    pub chat: ChatConfig,
+    #[serde(default)]
     pub buttons: Vec<ButtonConfig>,
     #[serde(default)]
     pub layers: Vec<LayerConfig>,
+}
+
+/// Chat window configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatConfig {
+    /// Anchor side: "left", "right", "top", "bottom"
+    #[serde(default = "default_chat_anchor")]
+    pub anchor: String,
+    /// Offset from anchor [x, y] in pixels
+    #[serde(default)]
+    pub offset: [i32; 2],
+    /// Vertical alignment when anchor is left/right: "top", "center", "bottom"
+    /// Horizontal alignment when anchor is top/bottom: "left", "center", "right"
+    #[serde(default = "default_chat_align")]
+    pub align: String,
+    /// Chat window size [width, height]
+    #[serde(default = "default_chat_size")]
+    pub size: [u32; 2],
+}
+
+impl Default for ChatConfig {
+    fn default() -> Self {
+        Self {
+            anchor: default_chat_anchor(),
+            offset: [0, 0],
+            align: default_chat_align(),
+            size: default_chat_size(),
+        }
+    }
+}
+
+fn default_chat_anchor() -> String {
+    "right".to_string()
+}
+
+fn default_chat_align() -> String {
+    "bottom".to_string()
+}
+
+fn default_chat_size() -> [u32; 2] {
+    [400, 500]
+}
+
+impl ChatConfig {
+    /// Calculate the offset for the chat window relative to the main window
+    pub fn calculate_offset(&self, main_width: u32, main_height: u32) -> [i32; 2] {
+        let chat_width = self.size[0] as i32;
+        let chat_height = self.size[1] as i32;
+        let main_w = main_width as i32;
+        let main_h = main_height as i32;
+
+        log::debug!(
+            "Chat offset calc: main={}x{}, chat={}x{}, anchor={}, align={}",
+            main_w, main_h, chat_width, chat_height, self.anchor, self.align
+        );
+
+        let (base_x, base_y) = match self.anchor.to_lowercase().as_str() {
+            "left" => (-chat_width, 0),
+            "right" => (main_w, 0),
+            "top" => (0, -chat_height),
+            "bottom" => (0, main_h),
+            _ => (main_w, 0), // default to right
+        };
+
+        // Apply alignment
+        let align_offset = match self.anchor.to_lowercase().as_str() {
+            "left" | "right" => {
+                // Vertical alignment
+                match self.align.to_lowercase().as_str() {
+                    "top" => 0,
+                    "center" => (main_h - chat_height) / 2,
+                    "bottom" => main_h - chat_height,
+                    _ => main_h - chat_height, // default to bottom
+                }
+            }
+            "top" | "bottom" => {
+                // Horizontal alignment
+                match self.align.to_lowercase().as_str() {
+                    "left" => 0,
+                    "center" => (main_w - chat_width) / 2,
+                    "right" => main_w - chat_width,
+                    _ => 0, // default to left
+                }
+            }
+            _ => 0,
+        };
+
+        log::debug!(
+            "Chat offset: base=({}, {}), align_offset={}, user_offset={:?}",
+            base_x, base_y, align_offset, self.offset
+        );
+
+        let (offset_x, offset_y) = match self.anchor.to_lowercase().as_str() {
+            "left" | "right" => (base_x + self.offset[0], align_offset + self.offset[1]),
+            "top" | "bottom" => (align_offset + self.offset[0], base_y + self.offset[1]),
+            _ => (base_x + self.offset[0], align_offset + self.offset[1]),
+        };
+
+        log::debug!("Chat final offset: ({}, {})", offset_x, offset_y);
+
+        [offset_x, offset_y]
+    }
 }
 
 /// Skin/background configuration
@@ -130,6 +234,8 @@ pub struct LayerConfig {
     /// Offset from anchor [x, y] in pixels
     #[serde(default)]
     pub offset: [f32; 2],
+    /// Optional size override [width, height] in pixels (default: use image size)
+    pub size: Option<[f32; 2]>,
     /// Optional text to display on the layer
     pub text: Option<String>,
     /// Text color [r, g, b, a]
@@ -141,6 +247,18 @@ pub struct LayerConfig {
     /// Z-order (higher = rendered on top)
     #[serde(default)]
     pub z_order: i32,
+    /// Text horizontal alignment: "left", "center", "right"
+    #[serde(default = "default_layer_text_align")]
+    pub text_align: String,
+    /// Text vertical alignment: "top", "center", "bottom"
+    #[serde(default = "default_layer_text_valign")]
+    pub text_valign: String,
+    /// Text offset from layer origin [x, y] in pixels
+    #[serde(default)]
+    pub text_offset: [f32; 2],
+    /// Padding from layer edges [left, right, top, bottom]
+    #[serde(default = "default_layer_text_padding")]
+    pub text_padding: [f32; 4],
 }
 
 fn default_layer_anchor() -> String {
@@ -153,6 +271,18 @@ fn default_layer_text_color() -> [f32; 4] {
 
 fn default_layer_font_size() -> f32 {
     16.0
+}
+
+fn default_layer_text_align() -> String {
+    "center".to_string()
+}
+
+fn default_layer_text_valign() -> String {
+    "center".to_string()
+}
+
+fn default_layer_text_padding() -> [f32; 4] {
+    [8.0, 8.0, 8.0, 8.0]
 }
 
 fn default_button_size() -> [f32; 2] {

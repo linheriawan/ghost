@@ -1,10 +1,12 @@
 //! Application state - combines UI and business logic
 
-use ghost_ui::{Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor, LayerConfig, LayerRenderer, SpritePipeline};
+use ghost_ui::{AnimatedSkin, AnimationState, Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor, LayerConfig, LayerRenderer, Skin, SpritePipeline, TextAlign, TextVAlign};
 use wgpu::TextureFormat;
 
 use crate::callout_app::{CalloutCommand, CalloutSender};
+use crate::chat_window::{ChatSender, ChatWindowCommand};
 use crate::config::Config;
+use crate::tray::{self, MenuIds, TrayCommand};
 use crate::ui;
 
 /// Main application state
@@ -17,6 +19,14 @@ pub struct App {
     layer_renderer: LayerRenderer,
     layer_pipeline: Option<SpritePipeline>,
     texture_format: Option<TextureFormat>,
+    /// Animated skin (if using frame sequences)
+    animated_skin: Option<AnimatedSkin>,
+    /// Tray menu IDs for event handling
+    menu_ids: Option<MenuIds>,
+    /// Flag to signal quit
+    should_quit: bool,
+    /// Chat window sender (to send commands to chat window)
+    chat_sender: ChatSender,
 }
 
 impl App {
@@ -26,6 +36,8 @@ impl App {
         skin_width: u32,
         skin_height: u32,
         callout_sender: CalloutSender,
+        animated_skin: Option<AnimatedSkin>,
+        chat_sender: ChatSender,
     ) -> Self {
         let buttons = ui::create_buttons_from_config(&config.buttons);
 
@@ -35,10 +47,15 @@ impl App {
             let ghost_config = LayerConfig {
                 anchor: LayerAnchor::from_str(&layer_config.anchor),
                 offset: layer_config.offset,
+                size: layer_config.size,
                 text: layer_config.text.clone(),
                 text_color: layer_config.text_color,
                 font_size: layer_config.font_size,
                 z_order: layer_config.z_order,
+                text_align: TextAlign::from_str(&layer_config.text_align),
+                text_valign: TextVAlign::from_str(&layer_config.text_valign),
+                text_offset: layer_config.text_offset,
+                text_padding: layer_config.text_padding,
             };
 
             match Layer::from_path(&layer_config.path, ghost_config) {
@@ -65,6 +82,10 @@ impl App {
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
             texture_format: None,
+            animated_skin,
+            menu_ids: None,
+            should_quit: false,
+            chat_sender,
         }
     }
 
@@ -74,11 +95,64 @@ impl App {
             log::error!("Failed to send callout command: {}", e);
         }
     }
+
+    /// Set tray menu IDs for event handling
+    pub fn set_menu_ids(&mut self, menu_ids: MenuIds) {
+        self.menu_ids = Some(menu_ids);
+    }
+
+    /// Set animation state by name
+    pub fn set_animation_state(&mut self, state_name: &str) {
+        if let Some(ref mut animated_skin) = self.animated_skin {
+            let state = AnimationState::from_str(state_name);
+            if animated_skin.has_state(state) {
+                animated_skin.set_state(state);
+                log::info!("Animation state changed to: {:?}", state);
+            } else {
+                log::warn!("Animation state not available: {}", state_name);
+            }
+        }
+    }
+
+    /// Open the chat window
+    fn open_chat_window(&self) {
+        if let Err(e) = self.chat_sender.send(ChatWindowCommand::Show) {
+            log::error!("Failed to send chat window show command: {}", e);
+        } else {
+            log::info!("Chat window show command sent");
+        }
+    }
+
+    /// Poll and handle tray menu events
+    fn poll_tray_events(&mut self) {
+        let Some(ref menu_ids) = self.menu_ids else { return };
+
+        if let Some(cmd) = tray::poll_menu_event(menu_ids) {
+            match cmd {
+                TrayCommand::OpenChat => {
+                    self.open_chat_window();
+                }
+                TrayCommand::SetState(state) => {
+                    self.set_animation_state(&state);
+                }
+                TrayCommand::Quit => {
+                    log::info!("Quit requested from tray");
+                    self.should_quit = true;
+                }
+            }
+        }
+    }
 }
 
 impl GhostApp for App {
     fn init_gpu(&mut self, gpu: GpuResources<'_>) {
         log::info!("Main window GPU initialized");
+
+        // Initialize animated skin GPU resources
+        if let Some(ref mut animated_skin) = self.animated_skin {
+            animated_skin.init_gpu(gpu.device, gpu.queue);
+            log::info!("Animated skin initialized with states: {:?}", animated_skin.available_states());
+        }
 
         // Initialize layer GPU resources
         for layer in &mut self.layers {
@@ -91,6 +165,34 @@ impl GhostApp for App {
 
         // Initialize layer text renderer
         self.layer_renderer.init_gpu(gpu.device, gpu.queue, gpu.format);
+    }
+
+    fn update(&mut self, delta: f32) {
+        // Poll tray menu events
+        self.poll_tray_events();
+
+        // Update animated skin
+        if let Some(ref mut animated_skin) = self.animated_skin {
+            animated_skin.update(delta);
+        }
+    }
+
+    fn current_skin(&self) -> Option<&Skin> {
+        // Return current frame of animated skin if available
+        self.animated_skin.as_ref().and_then(|a| a.current_skin())
+    }
+
+    fn target_fps(&self) -> f32 {
+        // Use fps from config, default to 30 if not animated
+        if self.animated_skin.is_some() {
+            self.config.skin.fps
+        } else {
+            30.0
+        }
+    }
+
+    fn should_quit(&self) -> bool {
+        self.should_quit
     }
 
     fn on_event(&mut self, event: GhostEvent) {
@@ -122,12 +224,10 @@ impl GhostApp for App {
                     }
                 }
             }
-            GhostEvent::Resized(width, height) => {
-                self.skin_size = (width, height);
-                // Recalculate layer positions
-                for layer in &mut self.layers {
-                    layer.calculate_position(width, height);
-                }
+            GhostEvent::Resized(_width, _height) => {
+                // Note: Don't update skin_size on resize. The skin dimensions are fixed,
+                // and layers should always be positioned relative to the original skin size.
+                // The resize event may give different values on HiDPI displays.
             }
             GhostEvent::Moved(_x, _y) => {
                 // Main window moved - callout window position is updated by the event loop
@@ -144,11 +244,11 @@ impl GhostApp for App {
         self.buttons.iter_mut().collect()
     }
 
-    fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, viewport: [f32; 2], scale_factor: f32) {
-        // Prepare layer bind groups
+    fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, viewport: [f32; 2], scale_factor: f32, opacity: f32) {
+        // Prepare layer bind groups with window opacity
         if let Some(pipeline) = &self.layer_pipeline {
             for layer in &mut self.layers {
-                layer.prepare(pipeline, device, queue, viewport, scale_factor);
+                layer.prepare_with_opacity(pipeline, device, queue, viewport, scale_factor, opacity);
             }
         }
 

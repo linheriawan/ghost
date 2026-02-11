@@ -3,10 +3,12 @@
 mod actions;
 mod app;
 mod callout_app;
+mod chat_window;
 mod config;
+mod tray;
 mod ui;
 
-use ghost_ui::{icon_bytes, skin, EventLoop, GhostWindowBuilder};
+use ghost_ui::{skin, AnimatedSkin, EventLoop, GhostWindowBuilder};
 
 fn main() {
     // Initialize logging
@@ -21,43 +23,78 @@ fn main() {
 
     log::info!("Loaded configuration from ui.toml");
     log::info!("Skin: {}", config.skin.path);
+    log::info!("Animated: {}", config.skin.animated);
     log::info!("Callout anchor: {}", config.callout.anchor);
     log::info!("Buttons: {}", config.buttons.len());
 
+    // --- CREATE EVENT LOOP FIRST (required for all windows) ---
     let event_loop = EventLoop::new();
 
+    // --- CREATE CHAT CHANNEL AND WINDOW ---
+    let (chat_sender, chat_receiver) = chat_window::create_chat_channel();
+    let chat_win = chat_window::ChatWindow::new(
+        &event_loop,
+        chat_receiver,
+        None,
+        config.chat.size,
+    );
+    log::info!("Chat window created (hidden) with size {:?}", config.chat.size);
+
     // --- 2. SETUP ICONS (tray + dock) ---
-    let mut app_icon = icon_bytes(include_bytes!("../assets/icon.png"));
-    if let Err(e) = app_icon.setup_all() {
-        log::error!("Failed to setup icons: {}", e);
-    }
+    // let mut app_icon = icon_bytes(include_bytes!("../assets/icon.png"));
+    // if let Err(e) = app_icon.setup_all() {
+    //     log::error!("Failed to setup icons: {}", e);
+    // }
+    let tray_components = tray::setup_tray("assets/icon.png");
 
     // --- 3. LOAD SKIN FROM CONFIG ---
-    let skin_data = skin(&config.skin.path).unwrap_or_else(|e| {
-        log::error!("Failed to load skin '{}': {}", config.skin.path, e);
-        panic!("Could not load skin image");
-    });
+    // Load either animated skin (directory of frames) or static skin (single image)
+    let (skin_width, skin_height, animated_skin) = if config.skin.animated {
+        // Load animated skin from directory
+        let animated = AnimatedSkin::from_directory(&config.skin.path, config.skin.fps)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to load animated skin '{}': {}", config.skin.path, e);
+                panic!("Could not load animated skin");
+            });
+        let dims = animated.dimensions().unwrap_or((200, 200));
+        log::info!("Loaded animated skin: {}x{} at {}fps", dims.0, dims.1, config.skin.fps);
+        (dims.0, dims.1, Some(animated))
+    } else {
+        // Load static skin
+        let skin_data = skin(&config.skin.path).unwrap_or_else(|e| {
+            log::error!("Failed to load skin '{}': {}", config.skin.path, e);
+            panic!("Could not load skin image");
+        });
+        (skin_data.width(), skin_data.height(), None)
+    };
 
     // --- 4. CREATE CALLOUT CHANNEL ---
     let (callout_sender, callout_receiver) = callout_app::create_callout_channel();
 
     // --- 5. CALCULATE CALLOUT WINDOW POSITION AND SIZE ---
-    let callout_offset = callout_app::calculate_callout_offset(&config, skin_data.width(), skin_data.height());
+    let callout_offset = callout_app::calculate_callout_offset(&config, skin_width, skin_height);
     let callout_size = callout_app::calculate_callout_size(&config);
 
     log::info!("Callout offset: {:?}, size: {:?}", callout_offset, callout_size);
 
     // --- 6. CREATE MAIN GHOST WINDOW ---
-    let main_window = GhostWindowBuilder::new()
-        .with_size(skin_data.width(), skin_data.height())
+    let mut window_builder = GhostWindowBuilder::new()
+        .with_size(skin_width, skin_height)
         .with_always_on_top(true)
         .with_draggable(true)
         .with_click_through(false)
         .with_alpha_hit_test(true)
         .with_opacity_focused(1.0)
         .with_opacity_unfocused(0.7)
-        .with_title("Ghost")
-        .with_skin_data(&skin_data)
+        .with_title("Ghost");
+
+    // Only set static skin if not using animated skin
+    if !config.skin.animated {
+        let skin_data = skin(&config.skin.path).unwrap();
+        window_builder = window_builder.with_skin_data(&skin_data);
+    }
+
+    let main_window = window_builder
         .build(&event_loop)
         .expect("Failed to create main window");
 
@@ -75,18 +112,32 @@ fn main() {
         .expect("Failed to create callout window");
 
     // --- 8. CREATE APPS ---
-    let main_app = app::App::new(config.clone(), skin_data.width(), skin_data.height(), callout_sender);
+    let mut main_app = app::App::new(
+        config.clone(),
+        skin_width,
+        skin_height,
+        callout_sender,
+        animated_skin,
+        chat_sender,
+    );
+    main_app.set_menu_ids(tray_components.menu_ids);
     let callout_window_app = callout_app::CalloutWindowApp::new(&config, callout_receiver);
 
-    log::info!("Ghost app started with linked callout window");
+    log::info!("Ghost app started with linked callout window and chat");
 
-    // Run with linked callout window
-    ghost_ui::run_with_app_and_callout(
+    // Calculate chat window offset from config
+    let chat_offset = config.chat.calculate_offset(skin_width, skin_height);
+    log::info!("Chat window offset: {:?}", chat_offset);
+
+    // Run with linked callout window and chat window
+    ghost_ui::run_with_app_callout_and_extra(
         main_window,
         callout_window,
         callout_offset,
+        chat_offset,
         event_loop,
         main_app,
         callout_window_app,
+        Some(chat_win),
     );
 }

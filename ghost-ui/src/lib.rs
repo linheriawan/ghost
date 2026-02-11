@@ -64,12 +64,12 @@ pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PlayMode};
 pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline};
 
 // Layer system
-pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer};
+pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer, TextAlign, TextVAlign};
 
 // Window
 pub use window::{
-    run, run_with_app, run_with_app_and_callout,
-    CalloutApp, CalloutWindowConfig,
+    run, run_with_app, run_with_app_and_callout, run_with_app_callout_and_extra,
+    CalloutApp, CalloutWindowConfig, ExtraWindow,
     GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
 };
 

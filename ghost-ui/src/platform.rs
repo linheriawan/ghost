@@ -17,9 +17,23 @@ pub fn configure_window(window: &Window, click_through: bool) {
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]
 fn configure_macos(window: &Window, click_through: bool) {
+    use cocoa::appkit::{NSColor, NSWindow};
+    use cocoa::base::nil;
     use tao::platform::macos::WindowExtMacOS;
+
     if click_through {
         let _ = window.set_ignore_cursor_events(true);
+    }
+
+    // Configure NSWindow for proper transparency
+    unsafe {
+        let ns_window = window.ns_window() as cocoa::base::id;
+        // Set window to non-opaque for transparency support
+        ns_window.setOpaque_(cocoa::base::NO);
+        // Set clear background color
+        ns_window.setBackgroundColor_(NSColor::clearColor(nil));
+        // Disable window shadow for cleaner transparency
+        ns_window.setHasShadow_(cocoa::base::NO);
     }
 }
 

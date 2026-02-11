@@ -104,24 +104,3 @@ glyphon = "0.5"          # Text rendering
 cosmic-text = "0.11"     # Text layout
 
 
-#### FFMPEG
-```bash
-# transparent png
-
-ffmpeg -i xiao-Mei_0.png \
-  -vf "chromakey=0x00FF00:0.1:0.3, despill=type=green, lutrgb=g='val*0.9',format=rgba" \
-  -pix_fmt rgba \
-  xiao-Mei1.png
-
-# transparent webm
-ffmpeg -i xiaoMei_talk0.mp4 -an \
-  -vf "chromakey=0x274535:0.15:0.3, chromakey=0x00ff00:0.15:0.3, chromakey=0x00ee00:0.15:0.3" \        
-  -c:v libvpx-vp9 \
-  -pix_fmt yuva420p \
-  -auto-alt-ref 0 \
-  -q:v 30 \
-  xiaoMei_talk0.webm
-
-# to frame sequence
-  ./convert_webm.sh ../assets/rin_talk.webm 24 ../assets/rin/talk
-```

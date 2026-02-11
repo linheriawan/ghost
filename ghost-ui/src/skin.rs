@@ -12,6 +12,8 @@ pub enum SkinError {
     ImageLoadError(#[from] image::ImageError),
     #[error("Failed to read file: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("{0}")]
+    NotFound(String),
 }
 
 /// Skin data that can be loaded before GPU initialization.

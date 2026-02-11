@@ -1,6 +1,6 @@
 //! Callout window application - renders the callout bubble in a separate window
 
-use ghost_callout::{Callout, CalloutStyle, CalloutType, TextAnimation};
+use ghost_callout::{Callout, CalloutStyle, TextAnimation};
 use ghost_ui::CalloutApp;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
@@ -59,7 +59,7 @@ impl CalloutApp for CalloutWindowApp {
         }
     }
 
-    fn prepare(&mut self, device: &Device, queue: &Queue, viewport: [f32; 2], scale_factor: f32) {
+    fn prepare(&mut self, device: &Device, queue: &Queue, viewport: [f32; 2], scale_factor: f32, _opacity: f32) {
         if self.callout.is_visible() {
             self.callout.prepare(device, queue, viewport, scale_factor);
         }
@@ -71,11 +71,21 @@ impl CalloutApp for CalloutWindowApp {
         }
     }
 
-    fn update(&mut self, delta: f32) {
+    fn update(&mut self, delta: f32) -> bool {
         // Process any pending commands
-        self.process_commands();
-        // Update callout animation
+        let had_commands = self.receiver.try_recv().is_ok();
+        if had_commands {
+            // Re-process including the one we just peeked
+            self.process_commands();
+        }
+
+        // Update callout animation - returns true if animation is active
+        let was_visible = self.callout.is_visible();
         self.callout.update(delta);
+        let is_visible = self.callout.is_visible();
+
+        // Need redraw if: had commands, visibility changed, or animation is running
+        had_commands || (was_visible != is_visible) || (is_visible && self.callout.is_animating())
     }
 }
 

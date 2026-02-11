@@ -3,5 +3,7 @@ target/
 Cargo.lock
 
 *~
-.DS_Store
+**/*.webm
+**/*.mp4
+**/*.DS_Store
 /.claude

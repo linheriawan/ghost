@@ -311,6 +311,23 @@ impl Callout {
         self.is_visible && self.visibility != VisibilityState::Hidden
     }
 
+    /// Check if any animation is currently running (text or visibility fade)
+    pub fn is_animating(&self) -> bool {
+        // Text animation in progress
+        let text_animating = self.text_animator
+            .as_ref()
+            .map(|a| !a.is_complete())
+            .unwrap_or(false);
+
+        // Visibility fade in progress
+        let visibility_animating = matches!(
+            self.visibility,
+            VisibilityState::FadingIn { .. } | VisibilityState::FadingOut { .. }
+        );
+
+        text_animating || visibility_animating
+    }
+
     /// Check if text animation is complete
     pub fn is_text_complete(&self) -> bool {
         self.text_animator

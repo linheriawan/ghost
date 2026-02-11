@@ -8,6 +8,52 @@ use wgpu::{BindGroup, Device, MultisampleState, Queue, RenderPass, TextureFormat
 
 use crate::{Skin, SkinData, SkinError, SpritePipeline};
 
+/// Text alignment options
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum TextAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+impl TextAlign {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "left" => Self::Left,
+            "center" => Self::Center,
+            "right" => Self::Right,
+            _ => {
+                log::warn!("Unknown text align '{}', defaulting to center", s);
+                Self::Center
+            }
+        }
+    }
+}
+
+/// Vertical alignment options
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum TextVAlign {
+    Top,
+    #[default]
+    Center,
+    Bottom,
+}
+
+impl TextVAlign {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "top" => Self::Top,
+            "center" => Self::Center,
+            "bottom" => Self::Bottom,
+            _ => {
+                log::warn!("Unknown text valign '{}', defaulting to center", s);
+                Self::Center
+            }
+        }
+    }
+}
+
 /// Position anchor for layers
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayerAnchor {
@@ -65,6 +111,8 @@ pub struct LayerConfig {
     pub anchor: LayerAnchor,
     /// Offset from anchor in pixels [x, y]
     pub offset: [f32; 2],
+    /// Optional size override [width, height] in pixels (None = use image size)
+    pub size: Option<[f32; 2]>,
     /// Optional text to render on the layer
     pub text: Option<String>,
     /// Text color [r, g, b, a]
@@ -73,6 +121,15 @@ pub struct LayerConfig {
     pub font_size: f32,
     /// Z-order (higher = on top)
     pub z_order: i32,
+    /// Text horizontal alignment: "left", "center", "right"
+    pub text_align: TextAlign,
+    /// Text vertical alignment: "top", "center", "bottom"
+    pub text_valign: TextVAlign,
+    /// Text offset from layer origin [x, y] in pixels
+    /// The origin is the top-left corner of the layer when text_align/valign are left/top
+    pub text_offset: [f32; 2],
+    /// Padding from layer edges [left, right, top, bottom]
+    pub text_padding: [f32; 4],
 }
 
 impl Default for LayerConfig {
@@ -80,10 +137,15 @@ impl Default for LayerConfig {
         Self {
             anchor: LayerAnchor::BottomCenter,
             offset: [0.0, 0.0],
+            size: None,
             text: None,
             text_color: [1.0, 1.0, 1.0, 1.0],
             font_size: 16.0,
             z_order: 0,
+            text_align: TextAlign::Center,
+            text_valign: TextVAlign::Center,
+            text_offset: [0.0, 0.0],
+            text_padding: [8.0, 8.0, 8.0, 8.0], // left, right, top, bottom
         }
     }
 }
@@ -183,6 +245,19 @@ impl Layer {
         viewport: [f32; 2],
         scale_factor: f32,
     ) {
+        self.prepare_with_opacity(pipeline, device, queue, viewport, scale_factor, 1.0);
+    }
+
+    /// Prepare the layer for rendering with custom opacity
+    pub fn prepare_with_opacity(
+        &mut self,
+        pipeline: &SpritePipeline,
+        device: &Device,
+        queue: &Queue,
+        viewport: [f32; 2],
+        scale_factor: f32,
+        opacity: f32,
+    ) {
         let Some(skin) = &self.skin else { return };
 
         // Scale the position by the display scale factor
@@ -192,18 +267,19 @@ impl Layer {
         ];
 
         log::debug!(
-            "Layer prepare: pos={:?}, scaled_pos={:?}, viewport={:?}, scale={}",
-            self.position, scaled_position, viewport, scale_factor
+            "Layer prepare: pos={:?}, scaled_pos={:?}, viewport={:?}, scale={}, opacity={}, size={:?}",
+            self.position, scaled_position, viewport, scale_factor, opacity, self.config.size
         );
 
-        self.bind_group = Some(pipeline.create_bind_group_at_position(
+        self.bind_group = Some(pipeline.create_bind_group_at_position_with_size(
             device,
             queue,
             skin,
-            1.0,
+            opacity,
             scaled_position,
             viewport,
             scale_factor,
+            self.config.size,
         ));
     }
 
@@ -262,6 +338,12 @@ impl LayerRenderer {
     }
 
     /// Prepare text for a layer
+    ///
+    /// Text positioning is relative to the layer:
+    /// - text_offset [x, y] is relative to the layer's top-left corner
+    /// - text_align determines horizontal alignment within the layer
+    /// - text_valign determines vertical alignment within the layer
+    /// - text_padding provides spacing from edges [left, right, top, bottom]
     pub fn prepare_text(
         &mut self,
         device: &Device,
@@ -283,16 +365,33 @@ impl LayerRenderer {
             Metrics::new(font_size, line_height),
         );
 
-        let (layer_width, layer_height) = layer.dimensions();
+        // Get layer dimensions (use configured size if available, else actual image size)
+        let (img_width, img_height) = layer.dimensions();
+        let (layer_width, layer_height) = layer.config.size
+            .map(|s| (s[0] as u32, s[1] as u32))
+            .unwrap_or((img_width, img_height));
+
         let layer_width_scaled = layer_width as f32 * scale_factor;
+        let layer_height_scaled = layer_height as f32 * scale_factor;
+
+        // Scale padding
+        let [pad_left, pad_right, pad_top, pad_bottom] = layer.config.text_padding;
+        let pad_left = pad_left * scale_factor;
+        let pad_right = pad_right * scale_factor;
+        let pad_top = pad_top * scale_factor;
+        let pad_bottom = pad_bottom * scale_factor;
+
+        // Available text area within padding
+        let text_area_width = layer_width_scaled - pad_left - pad_right;
+        let text_area_height = layer_height_scaled - pad_top - pad_bottom;
 
         self.text_buffer.set_size(
             &mut self.font_system,
-            layer_width_scaled,
-            line_height * 2.0,
+            text_area_width.max(1.0),
+            text_area_height.max(line_height),
         );
 
-        // Set text with centered alignment
+        // Set text
         let attrs = Attrs::new().family(Family::SansSerif);
         self.text_buffer.set_text(
             &mut self.font_system,
@@ -304,20 +403,48 @@ impl LayerRenderer {
         // Shape the text
         self.text_buffer.shape_until_scroll(&mut self.font_system);
 
-        // Calculate text position (centered on layer)
-        let pos = layer.position();
-        let layer_center_x = pos[0] * scale_factor + layer_width_scaled / 2.0;
-        let layer_center_y = pos[1] * scale_factor + (layer_height as f32 * scale_factor) / 2.0;
-
-        // Get text width for centering
+        // Get text dimensions
         let text_width: f32 = self.text_buffer
             .layout_runs()
             .map(|run| run.line_w)
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
+        let text_height = line_height; // Single line for now
 
-        let text_x = layer_center_x - text_width / 2.0;
-        let text_y = layer_center_y - line_height / 2.0;
+        // Calculate layer position in screen coordinates
+        let pos = layer.position();
+        let layer_x = pos[0] * scale_factor;
+        let layer_y = pos[1] * scale_factor;
+
+        // Apply text offset (scaled)
+        let offset_x = layer.config.text_offset[0] * scale_factor;
+        let offset_y = layer.config.text_offset[1] * scale_factor;
+
+        // Calculate text X position based on alignment
+        let text_x = match layer.config.text_align {
+            TextAlign::Left => {
+                layer_x + pad_left + offset_x
+            }
+            TextAlign::Center => {
+                layer_x + pad_left + (text_area_width - text_width) / 2.0 + offset_x
+            }
+            TextAlign::Right => {
+                layer_x + layer_width_scaled - pad_right - text_width + offset_x
+            }
+        };
+
+        // Calculate text Y position based on vertical alignment
+        let text_y = match layer.config.text_valign {
+            TextVAlign::Top => {
+                layer_y + pad_top + offset_y
+            }
+            TextVAlign::Center => {
+                layer_y + pad_top + (text_area_height - text_height) / 2.0 + offset_y
+            }
+            TextVAlign::Bottom => {
+                layer_y + layer_height_scaled - pad_bottom - text_height + offset_y
+            }
+        };
 
         // Convert color to glyphon format
         let [r, g, b, a] = layer.config.text_color;
