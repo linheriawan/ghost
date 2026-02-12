@@ -1,6 +1,6 @@
 //! Callout window application - renders the callout bubble in a separate window
 
-use ghost_callout::{Callout, CalloutStyle, TextAnimation};
+use ghost_ui::{Callout, CalloutStyle, TextAnimation};
 use ghost_ui::CalloutApp;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;

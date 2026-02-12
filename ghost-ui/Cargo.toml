@@ -16,6 +16,7 @@ thiserror = "1.0"
 pollster = "0.3"
 tray-icon = "0.14"
 glyphon = "0.5"
+cosmic-text = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.44", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }

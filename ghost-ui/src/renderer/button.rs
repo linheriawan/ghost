@@ -6,7 +6,7 @@ use wgpu::{
     BindGroup, BindGroupLayout, Buffer, Device, Queue, RenderPass, RenderPipeline, TextureFormat,
 };
 
-use crate::widget::{Button, Widget};
+use crate::elements::{Button, Widget};
 
 /// Vertex for button rendering
 #[repr(C)]

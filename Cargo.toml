@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["ghost-ui", "ghost-callout","gframekill"]
+members = ["ghost-ui", "gassetsmaker"]
 
 [dependencies]
 ghost-ui = { path = "./ghost-ui" }
-ghost-callout = { path = "./ghost-callout" }
 wgpu = "0.19"
 image = "0.24"
 log = "0.4"

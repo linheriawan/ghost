@@ -28,8 +28,13 @@ ghost/
 │       ├── elements/                # UI components (definitions only)
 │       │   ├── mod.rs
 │       │   ├── element.rs           # Element trait
-│       │   ├── panel.rs
 │       │   ├── button.rs
+│       │   ├── callout/             # Callout bubbles (merged from ghost-callout)
+│       │   │   ├── mod.rs           # Callout builder, state machine
+│       │   │   ├── types.rs         # CalloutType, ArrowPosition, TextAnimation, etc.
+│       │   │   ├── shape.rs         # Shape rendering (talk, think, scream)
+│       │   │   └── text.rs          # Text animation (typewriter, word-by-word)
+│       │   ├── panel.rs
 │       │   ├── label.rs
 │       │   ├── text_input.rs
 │       │   ├── image.rs
@@ -59,8 +64,6 @@ ghost/
 │           ├── sprite.rs            # Sprite/image rendering
 │           ├── shape.rs             # Shapes (rect, rounded rect)
 │           └── text.rs              # Text rendering
-│
-├── ghost-callout/                   # Keep as-is (callout bubbles)
 │
 └── src/                             # Main application
     ├── main.rs                      # Entry point, event loop only

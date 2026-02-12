@@ -6,7 +6,7 @@ use glyphon::{
 };
 use wgpu::{Device, MultisampleState, Queue, RenderPass, TextureFormat};
 
-use crate::types::{CalloutStyle, TextAnimation};
+use super::types::{CalloutStyle, TextAnimation};
 
 /// Text animator that handles progressive text reveal
 pub struct TextAnimator {

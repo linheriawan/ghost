@@ -1,6 +1,6 @@
 //! Business logic - what happens when user interacts
 
-use ghost_callout::Callout;
+use ghost_ui::Callout;
 
 /// Handle button click actions by button ID string
 pub fn on_button_click(button_id: &str, callout: &mut Callout) {

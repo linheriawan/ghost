@@ -3,8 +3,8 @@
 use ghost_ui::{AnimatedSkin, AnimationState, Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor, LayerConfig, LayerRenderer, Skin, SpritePipeline, TextAlign, TextVAlign};
 use wgpu::TextureFormat;
 
-use crate::callout_app::{CalloutCommand, CalloutSender};
-use crate::chat_window::{ChatSender, ChatWindowCommand};
+use super::callout_window::{CalloutCommand, CalloutSender};
+use super::chat_window::{ChatSender, ChatWindowCommand};
 use crate::config::Config;
 use crate::tray::{self, MenuIds, TrayCommand};
 use crate::ui;

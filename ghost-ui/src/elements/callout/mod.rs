@@ -1,12 +1,20 @@
 //! Main callout implementation
 
+pub mod shape;
+pub mod text;
+pub mod types;
+
 use std::time::Duration;
 
 use wgpu::{Device, Queue, RenderPass, TextureFormat};
 
-use crate::shape::{CalloutShape, ShapeRenderer};
-use crate::text::{TextAnimator, TextRenderer};
-use crate::types::{ArrowPosition, CalloutStyle, CalloutTiming, CalloutType, TextAnimation};
+use shape::{CalloutShape, ShapeRenderer};
+use text::{TextAnimator, TextRenderer};
+use types::{ArrowPosition, CalloutStyle, CalloutTiming, CalloutType, TextAnimation};
+
+// Re-exports
+pub use shape::ShapeRenderer as CalloutShapeRenderer;
+pub use text::{TextAnimator as CalloutTextAnimator, TextRenderer as CalloutTextRenderer};
 
 /// A callout bubble with text and animation
 pub struct Callout {

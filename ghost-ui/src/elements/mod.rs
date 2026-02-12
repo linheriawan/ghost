@@ -1,9 +1,10 @@
-//! Widget system for ghost-ui
+//! Elements system for ghost-ui
 //!
 //! Provides interactive UI elements like buttons that can be placed
 //! relative to the ghost window using a bottom-left origin coordinate system.
 
 mod button;
+pub mod callout;
 
 pub use button::{Button, ButtonId, ButtonState, ButtonStyle};
 

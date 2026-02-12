@@ -6,7 +6,7 @@ use wgpu::{
     BindGroup, BindGroupLayout, Buffer, Device, Queue, RenderPass, RenderPipeline, TextureFormat,
 };
 
-use crate::types::{ArrowPosition, CalloutStyle, CalloutType};
+use super::types::{ArrowPosition, CalloutStyle, CalloutType};
 
 /// Vertex format for shape rendering
 #[repr(C)]

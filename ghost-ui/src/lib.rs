@@ -45,10 +45,9 @@
 pub mod animated_skin;
 pub mod icon;
 pub mod layer;
-mod platform;
 mod renderer;
 mod skin;
-pub mod widget;
+pub mod elements;
 mod window;
 
 // Icon helpers
@@ -73,8 +72,14 @@ pub use window::{
     GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
 };
 
-// Widget system
-pub use widget::{Button, ButtonId, ButtonState, ButtonStyle, Origin, Widget};
+// Elements system
+pub use elements::{Button, ButtonId, ButtonState, ButtonStyle, Origin, Widget};
+
+// Callout (merged from ghost-callout)
+pub use elements::callout::{Callout, CalloutBuilder, CalloutShapeRenderer, CalloutTextAnimator, CalloutTextRenderer};
+pub use elements::callout::shape::CalloutShape;
+pub use elements::callout::text::{TextAnimator, TextRenderer as CalloutTextRendererFull};
+pub use elements::callout::types::{ArrowPosition, CalloutStyle, CalloutType, TextAnimation, CalloutTiming};
 
 // Re-export commonly used types
 pub use tao::event_loop::EventLoop;

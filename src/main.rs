@@ -1,12 +1,10 @@
 //! Ghost - Desktop mascot with callout bubbles
 
 mod actions;
-mod app;
-mod callout_app;
-mod chat_window;
 mod config;
 mod tray;
 mod ui;
+mod windows;
 
 use ghost_ui::{skin, AnimatedSkin, EventLoop, GhostWindowBuilder};
 
@@ -31,8 +29,8 @@ fn main() {
     let event_loop = EventLoop::new();
 
     // --- CREATE CHAT CHANNEL AND WINDOW ---
-    let (chat_sender, chat_receiver) = chat_window::create_chat_channel();
-    let chat_win = chat_window::ChatWindow::new(
+    let (chat_sender, chat_receiver) = windows::chat_window::create_chat_channel();
+    let chat_win = windows::chat_window::ChatWindow::new(
         &event_loop,
         chat_receiver,
         None,
@@ -69,11 +67,11 @@ fn main() {
     };
 
     // --- 4. CREATE CALLOUT CHANNEL ---
-    let (callout_sender, callout_receiver) = callout_app::create_callout_channel();
+    let (callout_sender, callout_receiver) = windows::callout_window::create_callout_channel();
 
     // --- 5. CALCULATE CALLOUT WINDOW POSITION AND SIZE ---
-    let callout_offset = callout_app::calculate_callout_offset(&config, skin_width, skin_height);
-    let callout_size = callout_app::calculate_callout_size(&config);
+    let callout_offset = windows::callout_window::calculate_callout_offset(&config, skin_width, skin_height);
+    let callout_size = windows::callout_window::calculate_callout_size(&config);
 
     log::info!("Callout offset: {:?}, size: {:?}", callout_offset, callout_size);
 
@@ -112,7 +110,7 @@ fn main() {
         .expect("Failed to create callout window");
 
     // --- 8. CREATE APPS ---
-    let mut main_app = app::App::new(
+    let mut main_app = windows::main_window::App::new(
         config.clone(),
         skin_width,
         skin_height,
@@ -121,7 +119,7 @@ fn main() {
         chat_sender,
     );
     main_app.set_menu_ids(tray_components.menu_ids);
-    let callout_window_app = callout_app::CalloutWindowApp::new(&config, callout_receiver);
+    let callout_window_app = windows::callout_window::CalloutWindowApp::new(&config, callout_receiver);
 
     log::info!("Ghost app started with linked callout window and chat");
 
