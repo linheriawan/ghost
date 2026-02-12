@@ -1419,7 +1419,7 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                 // Limit updates based on animation FPS (default 24fps = ~42ms)
                 // Use animation fps if available, otherwise 30fps for efficiency
                 let target_fps = app.current_skin()
-                    .map(|_| 30.0)  // If we have animated skin, use 30fps
+                    .map(|_| 24.0)  // If we have animated skin, use 30fps
                     .unwrap_or(10.0);  // If no animation, 10fps is enough for interactions
                 let min_frame_time = 1.0 / target_fps;
 

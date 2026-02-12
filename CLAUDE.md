@@ -1,5 +1,49 @@
 # GHOST APP
 ## main-app
+┌─────────────────────────────┐
+│ base layer                  │
+│    ┌───────────┐   ┌───┐    │
+│    │   Skin    │   | b |    │
+│    │           │   └───┘    │
+│    │    ┌───────────┐       │
+│    └────│  Layer ┌───┐      │
+|         |        | a |      |
+|         └────────└───┘      |
+└─────────────────────────────┘
+
+- Base Layer will be container for rendering the UI on a transparent window. 
+- skin is behind-most layer of stil image or a frame sequence animation.
+- layer will be stacked on top of other layer
+- a and b is form element, it is front-most element
+- all components(skin,layers,elements) is opaque, not individually transparent.
+- on window lost focus transparency should be applied to components as a whole (layer cant see-through skin)
+
+## chat-window
+┌────────────────────────────┐┌────────────────────────────┐
+│                            ││ [][][] Chat-window Title   │
+│                            │├────────────────────────────┘
+│                            ││┌─────────────────────────┐ │
+│                            │││ chat bubble area        │ │
+│       main window          │││                         │ │
+│  (the transparent window)  ││└─────────────────────────┘ │
+│                            ││┌─────────────┐ ┌────────┐  │
+│                            │││ input text  │ │ button │  │
+│                            ││└─────────────┘ └────────┘  │
+└────────────────────────────┘└────────────────────────────┘
+
+## windows
+
+### main-window
+style: transparent no title-bar,draggabe,resize-not-allowed
+behaviour: always-on-top, transparent on lost focus
+
+### chat-window
+style: opaque with title-bar,draggabe,resize
+behaviour: glued to/follow main-window edge, bring-to-front on main-window receive focus
+
+### setting-window
+style: opaque with title-bar,draggabe,resize
+behaviour: follow default OS behaviour for window
 
 ## ghost-ui
 

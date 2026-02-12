@@ -13,7 +13,7 @@
 
 ```
 ghost/
-├── ghost-window/                    # Window management + elements + layout
+├── ghost-ui/                    # Window management + elements + layout
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -75,14 +75,14 @@ ghost/
 
 ---
 
-## Module 1: ghost-window
+## Module 1: ghost-ui
 
 ### 1.1 Window Submodule
 
 **Responsibility**: Create and manage OS windows
 
 ```rust
-// ghost-window/src/window/config.rs
+// ghost-ui/src/window/config.rs
 pub struct WindowConfig {
     pub kind: WindowKind,
     pub size: Size,
@@ -110,7 +110,7 @@ pub enum WindowKind {
 Event handlers are **properties** (callbacks), not implementations:
 
 ```rust
-// ghost-window/src/elements/button.rs
+// ghost-ui/src/elements/button.rs
 pub struct Button {
     pub id: ElementId,
     pub label: String,
@@ -137,7 +137,7 @@ impl Button {
 ```
 
 ```rust
-// ghost-window/src/elements/element.rs
+// ghost-ui/src/elements/element.rs
 pub trait Element {
     fn id(&self) -> ElementId;
     fn intrinsic_size(&self) -> Size;
@@ -161,13 +161,13 @@ pub trait Element {
 **Responsibility**: Position and size components
 
 ```rust
-// ghost-window/src/layout/types.rs
+// ghost-ui/src/layout/types.rs
 pub struct Point { pub x: f32, pub y: f32 }
 pub struct Size { pub width: f32, pub height: f32 }
 pub struct Rect { pub origin: Point, pub size: Size }
 pub struct Edges { pub left: f32, pub right: f32, pub top: f32, pub bottom: f32 }
 
-// ghost-window/src/layout/config.rs
+// ghost-ui/src/layout/config.rs
 pub enum SizeMode {
     Fixed(f32),
     MatchParent,
@@ -203,7 +203,7 @@ pub enum LayoutPosition {
 **Responsibility**: Load and render skin images/animations with layout support
 
 ```rust
-// ghost-window/src/skin/mod.rs
+// ghost-ui/src/skin/mod.rs
 pub struct Skin {
     texture: Texture,
     size: Size,
@@ -219,7 +219,7 @@ pub struct AnimatedSkin {
     layout: SkinLayout,
 }
 
-// ghost-window/src/skin/layout.rs
+// ghost-ui/src/skin/layout.rs
 pub struct SkinLayout {
     pub anchor: Anchor,           // Where in window to anchor
     pub offset: Point,            // Offset from anchor
@@ -486,14 +486,14 @@ Skin Coordinates (within window):
 
 | Location | Responsibility |
 |----------|---------------|
-| `ghost-window/window/` | Create windows, set properties |
-| `ghost-window/elements/` | Define components, callback **properties** |
-| `ghost-window/layout/` | Position components, size modes |
-| `ghost-window/skin/` | Load images/animation, skin layout |
-| `ghost-window/renderer/` | GPU rendering |
+| `ghost-ui/window/` | Create windows, set properties |
+| `ghost-ui/elements/` | Define components, callback **properties** |
+| `ghost-ui/layout/` | Position components, size modes |
+| `ghost-ui/skin/` | Load images/animation, skin layout |
+| `ghost-ui/renderer/` | GPU rendering |
 | `src/windows/` | **Implement** event handlers, business logic |
 | `src/main.rs` | Event loop only |
 
 **Key Distinction**:
-- `ghost-window/elements/` defines `on_click: Option<Box<dyn Fn()>>` as a **property**
+- `ghost-ui/elements/` defines `on_click: Option<Box<dyn Fn()>>` as a **property**
 - `src/windows/` sets that property with **actual implementation**: `.on_click(|| self.do_something())`
