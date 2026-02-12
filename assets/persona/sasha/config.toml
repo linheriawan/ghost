@@ -1,0 +1,6 @@
+[character]
+name="Alexandra"
+nick="Sasha"
+animationstate=["idle","talk"]
+image="./Sasha.png"
+loading="Sasha is getting ready"

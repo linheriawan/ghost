@@ -13,6 +13,9 @@ raw-window-handle = "0.5"
 bytemuck = { version = "1.14", features = ["derive"] }
 log = "0.4"
 thiserror = "1.0"
+zip = "2"
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 tray-icon = "0.14"
 glyphon = "0.5"

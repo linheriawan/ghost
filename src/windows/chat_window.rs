@@ -71,7 +71,7 @@ impl ChatWindow {
             .with_min_inner_size(LogicalSize::new(300, 400))
             .with_title("Ghost Chat")
             .with_visible(false)
-            .with_decorations(false) // No title bar for precise alignment
+            .with_decorations(true)
             .build(event_loop)
             .expect("Failed to create chat window");
 

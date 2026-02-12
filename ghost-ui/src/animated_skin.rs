@@ -1,10 +1,37 @@
 //! Animated skin support with frame sequences and state management
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 use wgpu::{Device, Queue};
 
+use serde::Deserialize;
+
 use crate::skin::{Skin, SkinData, SkinError};
+
+/// Persona manifest matching config.toml format
+#[derive(Deserialize)]
+struct CharacterManifest {
+    character: CharacterInfoManifest,
+}
+
+#[derive(Deserialize)]
+struct CharacterInfoManifest {
+    name: String,
+    nick: String,
+    animationstate: Vec<String>,
+    image: String,
+    loading: String,
+}
+
+/// Metadata extracted from a persona package
+#[derive(Debug, Clone)]
+pub struct PersonaMeta {
+    pub name: String,
+    pub nick: String,
+    pub still_image: Option<SkinData>,
+    pub loading_text: String,
+}
 
 /// Animation playback mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +98,26 @@ impl Animation {
             fps,
             dir.display()
         );
+
+        Ok(Self {
+            textures: (0..frames.len()).map(|_| None).collect(),
+            frames,
+            fps,
+            play_mode: PlayMode::Loop,
+            current_frame: 0,
+            time_accumulator: 0.0,
+            direction: 1,
+            finished: false,
+        })
+    }
+
+    /// Create an animation from pre-loaded frame data
+    pub fn from_frames(frames: Vec<SkinData>, fps: f32) -> Result<Self, SkinError> {
+        if frames.is_empty() {
+            return Err(SkinError::NotFound("No frames provided".to_string()));
+        }
+
+        log::info!("Created animation from {} frames at {}fps", frames.len(), fps);
 
         Ok(Self {
             textures: (0..frames.len()).map(|_| None).collect(),
@@ -374,6 +421,137 @@ impl AnimatedSkin {
     /// Get available states
     pub fn available_states(&self) -> Vec<AnimationState> {
         self.animations.keys().copied().collect()
+    }
+
+    /// Load only metadata (manifest + still image) from a .persona.zip — fast, no frame loading.
+    pub fn load_meta_from_zip(path: impl AsRef<Path>) -> Result<PersonaMeta, SkinError> {
+        let file = std::fs::File::open(path.as_ref())
+            .map_err(|e| SkinError::IoError(e))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| SkinError::NotFound(format!("Invalid zip: {}", e)))?;
+
+        // Read config.toml
+        let manifest: CharacterManifest = {
+            let mut config_file = archive.by_name("config.toml")
+                .map_err(|e| SkinError::NotFound(format!("No config.toml in zip: {}", e)))?;
+            let mut s = String::new();
+            config_file.read_to_string(&mut s)
+                .map_err(|e| SkinError::IoError(e))?;
+            toml::from_str(&s)
+                .map_err(|e| SkinError::NotFound(format!("Invalid config.toml: {}", e)))?
+        };
+
+        // Load still image
+        let image_name = manifest.character.image
+            .strip_prefix("./")
+            .unwrap_or(&manifest.character.image)
+            .to_string();
+
+        let still_image = if let Ok(mut img_file) = archive.by_name(&image_name) {
+            let mut buf = Vec::new();
+            img_file.read_to_end(&mut buf)
+                .map_err(|e| SkinError::IoError(e))?;
+            Some(SkinData::from_bytes(&buf)?)
+        } else {
+            log::warn!("Still image '{}' not found in zip", image_name);
+            None
+        };
+
+        Ok(PersonaMeta {
+            name: manifest.character.name,
+            nick: manifest.character.nick,
+            still_image,
+            loading_text: manifest.character.loading,
+        })
+    }
+
+    /// Load a full animated skin from a .persona.zip file.
+    /// Returns (AnimatedSkin, PersonaMeta).
+    pub fn from_zip(path: impl AsRef<Path>, fps: f32) -> Result<(Self, PersonaMeta), SkinError> {
+        let file = std::fs::File::open(path.as_ref())
+            .map_err(|e| SkinError::IoError(e))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| SkinError::NotFound(format!("Invalid zip: {}", e)))?;
+
+        // Read config.toml
+        let manifest: CharacterManifest = {
+            let mut config_file = archive.by_name("config.toml")
+                .map_err(|e| SkinError::NotFound(format!("No config.toml in zip: {}", e)))?;
+            let mut s = String::new();
+            config_file.read_to_string(&mut s)
+                .map_err(|e| SkinError::IoError(e))?;
+            toml::from_str(&s)
+                .map_err(|e| SkinError::NotFound(format!("Invalid config.toml: {}", e)))?
+        };
+
+        // Load still image
+        let image_name = manifest.character.image
+            .strip_prefix("./")
+            .unwrap_or(&manifest.character.image)
+            .to_string();
+
+        let still_image = if let Ok(mut img_file) = archive.by_name(&image_name) {
+            let mut buf = Vec::new();
+            img_file.read_to_end(&mut buf)
+                .map_err(|e| SkinError::IoError(e))?;
+            Some(SkinData::from_bytes(&buf)?)
+        } else {
+            None
+        };
+
+        let meta = PersonaMeta {
+            name: manifest.character.name.clone(),
+            nick: manifest.character.nick.clone(),
+            still_image,
+            loading_text: manifest.character.loading.clone(),
+        };
+
+        // Collect all file names from the archive first
+        let file_names: Vec<String> = (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+            .collect();
+
+        // Load animation states
+        let mut skin = Self::new();
+        for state_name in &manifest.character.animationstate {
+            // Find matching frame entries
+            let prefix = format!("{}/frame_", state_name);
+            let mut frame_entries: Vec<&str> = file_names
+                .iter()
+                .filter(|name| name.starts_with(&prefix) && name.ends_with(".png"))
+                .map(|s| s.as_str())
+                .collect();
+            frame_entries.sort();
+
+            let mut frames = Vec::new();
+            for entry_name in &frame_entries {
+                let mut file = archive.by_name(entry_name)
+                    .map_err(|e| SkinError::NotFound(format!("Failed to read {}: {}", entry_name, e)))?;
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf)
+                    .map_err(|e| SkinError::IoError(e))?;
+                frames.push(SkinData::from_bytes(&buf)?);
+            }
+
+            if !frames.is_empty() {
+                let state = AnimationState::from_str(state_name);
+                let anim = Animation::from_frames(frames, fps)?;
+                skin.add_animation(state, anim);
+                log::info!("Loaded state '{}' with {} frames from zip", state_name, frame_entries.len());
+            }
+        }
+
+        if skin.animations.is_empty() {
+            return Err(SkinError::NotFound("No animation states found in zip".to_string()));
+        }
+
+        // Set the first available state as default
+        if let Some(state) = skin.animations.keys().next().copied() {
+            skin.current_state = state;
+            skin.default_state = state;
+        }
+
+        Ok((skin, meta))
     }
 
     /// Play a one-shot animation and return to default when done
