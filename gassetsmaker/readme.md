@@ -26,4 +26,7 @@ ffmpeg -i ../ghost/assets/sasha_idle.mp4 \
 
 # remove transparent pixel
 cargo run -- --path ../ghost/assets/persona/minAh/idle/
+
+# make zip persona package
+cargo run -p gassetsmaker -- pack assets/persona/sasha/
 ```

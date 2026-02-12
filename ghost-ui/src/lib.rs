@@ -57,7 +57,7 @@ pub use icon::{icon, icon_bytes, AppIcon, IconError};
 pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
 
 // Animated skin
-pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PlayMode};
+pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PersonaMeta, PlayMode};
 
 // Renderer
 pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline};

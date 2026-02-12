@@ -55,6 +55,7 @@ pub struct ChatWindow {
     visible: bool,
     needs_repaint: bool,
     start_time: Instant,
+    assistant_name: String,
 }
 
 impl ChatWindow {
@@ -64,6 +65,7 @@ impl ChatWindow {
         receiver: ChatReceiver,
         on_send: Option<Sender<String>>,
         size: [u32; 2],
+        assistant_name: Option<String>,
     ) -> Self {
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
@@ -136,6 +138,8 @@ impl ChatWindow {
         // Create egui-wgpu renderer
         let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1);
 
+        let assistant_name = assistant_name.unwrap_or_else(|| "Assistant".to_string());
+
         Self {
             window,
             surface,
@@ -154,6 +158,7 @@ impl ChatWindow {
             visible: false,
             needs_repaint: true,
             start_time: Instant::now(),
+            assistant_name,
         }
     }
 
@@ -419,21 +424,36 @@ impl ChatWindow {
         let messages = self.messages.clone();
         let mut input_text = std::mem::take(&mut self.input_text);
         let on_send = self.on_send.clone();
+        let assistant_name = self.assistant_name.clone();
 
         // New messages to add after the frame
         let mut new_messages: Vec<ChatMessage> = Vec::new();
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            // Use TopBottomPanel for fixed input at bottom (like WhatsApp)
+            // Dark theme style overrides
+            let mut style = (*ctx.style()).clone();
+            style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 55, 70);
+            style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(65, 65, 80);
+            style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(59, 130, 246);
+            ctx.set_style(style);
+
+            // Bottom panel: input area
             egui::TopBottomPanel::bottom("input_panel")
                 .resizable(false)
-                .min_height(50.0)
+                .min_height(56.0)
+                .frame(egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(30, 30, 46))
+                    .inner_margin(egui::Margin::symmetric(12.0, 10.0)))
                 .show(ctx, |ui| {
-                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
+                        let available = ui.available_width();
+
+                        // Styled text input
                         let text_edit = egui::TextEdit::singleline(&mut input_text)
                             .hint_text("Type a message...")
-                            .desired_width(ui.available_width() - 70.0);
+                            .desired_width(available - 60.0)
+                            .text_color(egui::Color32::WHITE)
+                            .frame(true);
 
                         let response = ui.add(text_edit);
 
@@ -441,23 +461,28 @@ impl ChatWindow {
                         let enter_pressed =
                             response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
-                        let send_clicked = ui.button("Send").clicked();
+                        // Accent send button
+                        let send_btn = egui::Button::new(
+                            egui::RichText::new(">").color(egui::Color32::WHITE).strong().size(16.0)
+                        )
+                        .fill(egui::Color32::from_rgb(59, 130, 246))
+                        .rounding(8.0)
+                        .min_size(egui::vec2(40.0, 32.0));
+
+                        let send_clicked = ui.add(send_btn).clicked();
 
                         if (enter_pressed || send_clicked) && !input_text.trim().is_empty() {
                             let user_msg = input_text.trim().to_string();
 
-                            // Add user message to chat
                             new_messages.push(ChatMessage {
                                 role: "user".to_string(),
                                 content: user_msg.clone(),
                             });
 
-                            // Send to callback if available
                             if let Some(ref sender) = on_send {
                                 let _ = sender.send(user_msg.clone());
                             }
 
-                            // For now, echo back a placeholder response
                             new_messages.push(ChatMessage {
                                 role: "assistant".to_string(),
                                 content: format!(
@@ -469,55 +494,92 @@ impl ChatWindow {
                             input_text.clear();
                         }
                     });
-                    ui.add_space(8.0);
                 });
 
-            // Main content area with messages
-            egui::CentralPanel::default().show(ctx, |ui| {
-                // Chat title
-                ui.horizontal(|ui| {
-                    ui.heading("Chat");
-                });
-                ui.separator();
+            // Central panel: messages area
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(24, 24, 32))
+                    .inner_margin(egui::Margin::symmetric(12.0, 8.0)))
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            let panel_width = ui.available_width();
 
-                // Messages area (scrollable, takes remaining space)
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        for msg in &messages {
-                            let is_user = msg.role == "user";
-
-                            ui.horizontal(|ui| {
-                                if is_user {
-                                    ui.add_space(ui.available_width() * 0.3);
-                                }
-
-                                let bg_color = if is_user {
-                                    egui::Color32::from_rgb(59, 130, 246) // Blue for user
+                            for msg in &messages {
+                                let is_user = msg.role == "user";
+                                let role_label = if is_user {
+                                    "You"
                                 } else {
-                                    egui::Color32::from_rgb(75, 85, 99) // Gray for assistant
+                                    &assistant_name
                                 };
 
-                                let text_color = egui::Color32::WHITE;
+                                let bg_color = if is_user {
+                                    egui::Color32::from_rgb(59, 130, 246) // #3b82f6
+                                } else {
+                                    egui::Color32::from_rgb(55, 65, 81) // #374151
+                                };
 
-                                egui::Frame::none()
-                                    .fill(bg_color)
-                                    .rounding(8.0)
-                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
-                                    .show(ui, |ui| {
-                                        ui.set_max_width(ui.available_width() * 0.7);
-                                        ui.label(egui::RichText::new(&msg.content).color(text_color));
+                                let max_bubble_width = panel_width * 0.8;
+
+                                // Layout: right-aligned for user, left-aligned for assistant
+                                if is_user {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                                        ui.allocate_ui(egui::vec2(max_bubble_width, 0.0), |ui| {
+                                            ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                                                // Role label
+                                                ui.label(
+                                                    egui::RichText::new(role_label)
+                                                        .color(egui::Color32::from_rgb(140, 140, 160))
+                                                        .size(11.0)
+                                                );
+                                                // Bubble
+                                                egui::Frame::none()
+                                                    .fill(bg_color)
+                                                    .rounding(12.0)
+                                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                                    .show(ui, |ui| {
+                                                        ui.set_max_width(max_bubble_width - 24.0);
+                                                        ui.label(
+                                                            egui::RichText::new(&msg.content)
+                                                                .color(egui::Color32::WHITE)
+                                                        );
+                                                    });
+                                            });
+                                        });
                                     });
-
-                                if !is_user {
-                                    ui.add_space(ui.available_width());
+                                } else {
+                                    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                                        ui.allocate_ui(egui::vec2(max_bubble_width, 0.0), |ui| {
+                                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                                // Role label
+                                                ui.label(
+                                                    egui::RichText::new(role_label)
+                                                        .color(egui::Color32::from_rgb(140, 140, 160))
+                                                        .size(11.0)
+                                                );
+                                                // Bubble
+                                                egui::Frame::none()
+                                                    .fill(bg_color)
+                                                    .rounding(12.0)
+                                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                                    .show(ui, |ui| {
+                                                        ui.set_max_width(max_bubble_width - 24.0);
+                                                        ui.label(
+                                                            egui::RichText::new(&msg.content)
+                                                                .color(egui::Color32::WHITE)
+                                                        );
+                                                    });
+                                            });
+                                        });
+                                    });
                                 }
-                            });
-                            ui.add_space(8.0);
-                        }
-                    });
-            });
+                                ui.add_space(12.0);
+                            }
+                        });
+                });
         });
 
         // Update state with new messages and input
@@ -562,9 +624,9 @@ impl ChatWindow {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
+                            r: 0.094,
+                            g: 0.094,
+                            b: 0.125,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

@@ -9,11 +9,67 @@ pub struct Config {
     pub skin: SkinConfig,
     pub callout: CalloutConfig,
     #[serde(default)]
+    pub window: WindowStartConfig,
+    #[serde(default)]
     pub chat: ChatConfig,
     #[serde(default)]
     pub buttons: Vec<ButtonConfig>,
     #[serde(default)]
     pub layers: Vec<LayerConfig>,
+}
+
+/// Main window startup configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct WindowStartConfig {
+    /// Startup position: "top-left", "top-center", "top-right",
+    /// "center-left", "center", "center-right",
+    /// "bottom-left", "bottom-center", "bottom-right"
+    #[serde(default = "default_window_position")]
+    pub position: String,
+    /// Additional offset from position [x, y] in pixels
+    #[serde(default)]
+    pub offset: [i32; 2],
+}
+
+impl Default for WindowStartConfig {
+    fn default() -> Self {
+        Self {
+            position: default_window_position(),
+            offset: [0, 0],
+        }
+    }
+}
+
+fn default_window_position() -> String {
+    "bottom-right".to_string()
+}
+
+impl WindowStartConfig {
+    /// Calculate the startup position in physical pixels given monitor and window dimensions
+    pub fn calculate_position(&self, monitor_width: u32, monitor_height: u32, window_width: u32, window_height: u32) -> (i32, i32) {
+        let mw = monitor_width as i32;
+        let mh = monitor_height as i32;
+        let ww = window_width as i32;
+        let wh = window_height as i32;
+
+        let (x, y) = match self.position.to_lowercase().as_str() {
+            "top-left" | "topleft" => (0, 0),
+            "top-center" | "topcenter" | "top" => ((mw - ww) / 2, 0),
+            "top-right" | "topright" => (mw - ww, 0),
+            "center-left" | "centerleft" | "left" => (0, (mh - wh) / 2),
+            "center-center" | "centercenter" | "center" => ((mw - ww) / 2, (mh - wh) / 2),
+            "center-right" | "centerright" | "right" => (mw - ww, (mh - wh) / 2),
+            "bottom-left" | "bottomleft" => (0, mh - wh),
+            "bottom-center" | "bottomcenter" | "bottom" => ((mw - ww) / 2, mh - wh),
+            "bottom-right" | "bottomright" => (mw - ww, mh - wh),
+            _ => {
+                log::warn!("Unknown window position '{}', defaulting to bottom-right", self.position);
+                (mw - ww, mh - wh)
+            }
+        };
+
+        (x + self.offset[0], y + self.offset[1])
+    }
 }
 
 /// Chat window configuration
@@ -59,9 +115,15 @@ fn default_chat_size() -> [u32; 2] {
 
 impl ChatConfig {
     /// Calculate the offset for the chat window relative to the main window
+    /// `actual_chat_size` overrides `self.size` when the real window size differs from config
     pub fn calculate_offset(&self, main_width: u32, main_height: u32) -> [i32; 2] {
-        let chat_width = self.size[0] as i32;
-        let chat_height = self.size[1] as i32;
+        self.calculate_offset_with_size(main_width, main_height, self.size)
+    }
+
+    /// Calculate offset using the given chat window size
+    pub fn calculate_offset_with_size(&self, main_width: u32, main_height: u32, chat_size: [u32; 2]) -> [i32; 2] {
+        let chat_width = chat_size[0] as i32;
+        let chat_height = chat_size[1] as i32;
         let main_w = main_width as i32;
         let main_h = main_height as i32;
 

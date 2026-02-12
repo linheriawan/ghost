@@ -1175,6 +1175,12 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
     let mut main_pos: (i32, i32) = main_window.outer_position().unwrap_or((0, 0));
     let mut extra_was_visible = false;
 
+    // Snap/unsnap state for extra window
+    let mut extra_snapped = true;
+    let mut extra_last_set_pos: (i32, i32) = (0, 0);
+    // Suppress false unsnap when OS fires Moved events during resize
+    let mut extra_just_resized = false;
+
     // Get scale factor for converting logical to physical offsets
     let scale_factor = main_window.window().scale_factor();
     let scaled_callout_offset = [
@@ -1194,7 +1200,10 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
     // Position callout and extra windows initially
     callout_window.set_position(main_pos.0 + scaled_callout_offset[0], main_pos.1 + scaled_callout_offset[1]);
     if let Some(ref extra) = extra_window {
-        extra.set_position(main_pos.0 + scaled_extra_offset[0], main_pos.1 + scaled_extra_offset[1]);
+        let ex = main_pos.0 + scaled_extra_offset[0];
+        let ey = main_pos.1 + scaled_extra_offset[1];
+        extra.set_position(ex, ey);
+        extra_last_set_pos = (ex, ey);
     }
 
     event_loop.run(move |event, _, control_flow| {
@@ -1293,18 +1302,20 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                         // Update tracked position
                         main_pos = (position.x, position.y);
 
-                        // Update callout window position to follow main window
+                        // Callout always follows main window
                         callout_window.set_position(
                             position.x + scaled_callout_offset[0],
                             position.y + scaled_callout_offset[1],
                         );
-                        // Update extra window position to follow main window
-                        if let Some(ref extra) = extra_window {
-                            if extra.is_visible() {
-                                extra.set_position(
-                                    position.x + scaled_extra_offset[0],
-                                    position.y + scaled_extra_offset[1],
-                                );
+                        // Extra window only follows if snapped
+                        if extra_snapped {
+                            if let Some(ref extra) = extra_window {
+                                if extra.is_visible() {
+                                    let new_x = position.x + scaled_extra_offset[0];
+                                    let new_y = position.y + scaled_extra_offset[1];
+                                    extra.set_position(new_x, new_y);
+                                    extra_last_set_pos = (new_x, new_y);
+                                }
                             }
                         }
                         app.on_event(GhostEvent::Moved(position.x, position.y));
@@ -1328,8 +1339,52 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
             }
 
             Event::WindowEvent { window_id, event, .. } if Some(window_id) == extra_window_id => {
+                // Track resize to suppress false unsnap from OS-generated Moved events
+                if let WindowEvent::Resized(_) = &event {
+                    extra_just_resized = true;
+                }
+
+                // Detect user-initiated drag: unsnap or re-snap by proximity
+                if let WindowEvent::Moved(position) = &event {
+                    if extra_just_resized {
+                        // Resize caused this Moved event — update tracked position, don't unsnap
+                        extra_just_resized = false;
+                        if extra_snapped {
+                            extra_last_set_pos = (position.x, position.y);
+                        }
+                    } else {
+                        let snap_x = main_pos.0 + scaled_extra_offset[0];
+                        let snap_y = main_pos.1 + scaled_extra_offset[1];
+
+                        if extra_snapped {
+                            // Unsnap if dragged far from expected position
+                            let unsnap_tolerance = 10;
+                            if (position.x - extra_last_set_pos.0).abs() > unsnap_tolerance
+                                || (position.y - extra_last_set_pos.1).abs() > unsnap_tolerance
+                            {
+                                extra_snapped = false;
+                                log::info!("Chat window unsnapped");
+                            }
+                        } else {
+                            // Re-snap if dragged close to snap position
+                            let snap_tolerance = 30;
+                            if (position.x - snap_x).abs() <= snap_tolerance
+                                && (position.y - snap_y).abs() <= snap_tolerance
+                            {
+                                extra_snapped = true;
+                                extra_last_set_pos = (snap_x, snap_y);
+                                if let Some(ref extra) = extra_window {
+                                    extra.set_position(snap_x, snap_y);
+                                }
+                                log::info!("Chat window re-snapped");
+                            }
+                        }
+                    }
+                }
                 if let Some(ref mut extra) = extra_window {
                     extra.handle_event(&event);
+                    // Request redraw after any event so egui re-renders
+                    extra.request_redraw();
                 }
             }
 
@@ -1359,21 +1414,20 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                 let callout_changed = callout_app.update(delta);
 
                 // Process extra window updates
-                let mut extra_needs_redraw = false;
                 if let Some(ref mut extra) = extra_window {
                     extra.process_updates();
 
-                    // Check if extra window just became visible - reposition it
+                    // Check if extra window just became visible - re-snap and reposition
                     let is_visible = extra.is_visible();
                     if is_visible && !extra_was_visible {
                         if let Some((x, y)) = main_window.outer_position() {
                             main_pos = (x, y);
                         }
-                        extra.set_position(
-                            main_pos.0 + scaled_extra_offset[0],
-                            main_pos.1 + scaled_extra_offset[1],
-                        );
-                        extra_needs_redraw = true;
+                        extra_snapped = true;
+                        let snap_x = main_pos.0 + scaled_extra_offset[0];
+                        let snap_y = main_pos.1 + scaled_extra_offset[1];
+                        extra.set_position(snap_x, snap_y);
+                        extra_last_set_pos = (snap_x, snap_y);
                     }
                     extra_was_visible = is_visible;
                 }
@@ -1395,9 +1449,10 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                     callout_window.request_redraw();
                 }
 
-                // Redraw extra window if needed
+                // Always redraw extra window when visible (egui needs continuous frames
+                // for cursor blink, hover effects, and proper layout)
                 if let Some(ref extra) = extra_window {
-                    if extra.is_visible() && extra_needs_redraw {
+                    if extra.is_visible() {
                         extra.request_redraw();
                     }
                 }

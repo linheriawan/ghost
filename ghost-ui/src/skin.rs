@@ -18,7 +18,7 @@ pub enum SkinError {
 
 /// Skin data that can be loaded before GPU initialization.
 /// Use this for runtime skin loading/switching.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SkinData {
     bytes: Vec<u8>,
     width: u32,
@@ -61,6 +61,25 @@ impl SkinData {
     /// Get dimensions as (width, height).
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Create a solid color SkinData (useful for programmatic backgrounds).
+    pub fn solid_color(width: u32, height: u32, color: [u8; 4]) -> Result<Self, SkinError> {
+        use image::{Rgba, RgbaImage};
+        use std::io::Cursor;
+
+        let img = RgbaImage::from_pixel(width, height, Rgba(color));
+        let dyn_img = DynamicImage::ImageRgba8(img);
+        let mut buf = Cursor::new(Vec::new());
+        dyn_img
+            .write_to(&mut buf, image::ImageOutputFormat::Png)
+            .map_err(|e| SkinError::ImageLoadError(e))?;
+        let bytes = buf.into_inner();
+        Ok(Self {
+            bytes,
+            width,
+            height,
+        })
     }
 }
 

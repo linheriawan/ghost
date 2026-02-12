@@ -337,6 +337,29 @@ impl LayerRenderer {
         log::info!("LayerRenderer GPU initialized");
     }
 
+    /// Clear text state at the beginning of each frame.
+    /// Must be called before any `prepare_text` calls to prevent stale text from persisting.
+    pub fn begin_frame(&mut self, device: &Device, queue: &Queue, viewport: [f32; 2]) {
+        let Some(atlas) = &mut self.text_atlas else { return };
+        let Some(renderer) = &mut self.text_renderer else { return };
+
+        let resolution = Resolution {
+            width: viewport[0] as u32,
+            height: viewport[1] as u32,
+        };
+
+        // Prepare with empty text areas to clear the renderer's vertex buffer
+        let _ = renderer.prepare(
+            device,
+            queue,
+            &mut self.font_system,
+            atlas,
+            resolution,
+            std::iter::empty::<TextArea>(),
+            &mut self.swash_cache,
+        );
+    }
+
     /// Prepare text for a layer
     ///
     /// Text positioning is relative to the layer:

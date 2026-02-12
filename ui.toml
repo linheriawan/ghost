@@ -1,10 +1,19 @@
 # Ghost UI Configuration
 
+# Main window startup configuration
+[window]
+# Startup position on screen: "top-left", "top-center", "top-right",
+# "center-left", "center", "center-right",
+# "bottom-left", "bottom-center", "bottom-right"
+position = "bottom-right"
+# Additional offset from position [x, y] in pixels
+offset = [0, 0]
+
 [skin]
 # Path to the skin - either a single image file or directory with animation states
 # For animated skin, the directory should contain subdirectories: idle/, talk/, think/, etc.
 # Each subdirectory should have frame_0001.png, frame_0002.png, etc.
-path = "assets/persona/sasha"
+path = "assets/persona/sasha.persona.zip"
 # Set to true for animated frame sequences
 animated = true
 # Frames per second for animation playback
@@ -88,9 +97,9 @@ style = "light"
 [[layers]]
 path = "assets/name_plate.png"
 anchor = "bottom-center"  # Where to position relative to skin
-offset = [60.0, 25.0]       # Offset from anchor [x, y]
-size = [320.0, 90.0]
-text = "Xiao Mei"            # Text to display on the layer
+offset = [0.0, 0.0]       # Offset from anchor [x, y]
+size = [430.0, 100.0]
+text = "{name}"
 text_color = [0.2, 0.2, 0.2, 1.0]  # RGBA
 font_size = 24.0
 z_order = 0               # Higher values render on top
