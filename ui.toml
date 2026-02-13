@@ -13,9 +13,9 @@ offset = [0, 0]
 # Path to the skin - either a single image file or directory with animation states
 # For animated skin, the directory should contain subdirectories: idle/, talk/, think/, etc.
 # Each subdirectory should have frame_0001.png, frame_0002.png, etc.
-path = "assets/persona/sasha.persona.zip"
+path = "assets/raw/Xiao Mei.png"
 # Set to true for animated frame sequences
-animated = true
+animated = false
 # Frames per second for animation playback
 fps = 24
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 use tray_icon::menu::{MenuEvent, MenuId};
 use tray_icon::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, CheckMenuItem, MenuItem, PredefinedMenuItem, Submenu},
     TrayIcon, TrayIconBuilder,
 };
 
@@ -45,7 +45,7 @@ pub fn setup_tray(icon_path: &str) -> TrayComponents {
         .unwrap();
 
     // 2. Main Menu Items
-    let open_chat_item = MenuItem::new("Open Chat Window", true, None);
+    let open_chat_item = CheckMenuItem::new("Chat Window", true, false, None);
     let quit_item = MenuItem::new("Quit", true, None);
 
     let open_chat_id = open_chat_item.id().clone();

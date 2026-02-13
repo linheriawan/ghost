@@ -14,6 +14,8 @@ use tao::event_loop::EventLoop;
 use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
+use crate::vars::GhostState;
+
 /// Message in the chat
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
@@ -56,6 +58,10 @@ pub struct ChatWindow {
     needs_repaint: bool,
     start_time: Instant,
     assistant_name: String,
+    /// Shared state for cross-window coordination
+    state: GhostState,
+    /// Track previous visibility for re-snap on show
+    was_visible: bool,
 }
 
 impl ChatWindow {
@@ -66,6 +72,7 @@ impl ChatWindow {
         on_send: Option<Sender<String>>,
         size: [u32; 2],
         assistant_name: Option<String>,
+        state: GhostState,
     ) -> Self {
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
@@ -159,6 +166,8 @@ impl ChatWindow {
             needs_repaint: true,
             start_time: Instant::now(),
             assistant_name,
+            state,
+            was_visible: false,
         }
     }
 
@@ -228,8 +237,9 @@ impl ChatWindow {
         }
     }
 
-    /// Process incoming commands
-    pub fn process_commands(&mut self) {
+    /// Process incoming commands and update snap/visibility state
+    pub fn update_state(&mut self, _delta: f32) {
+        // 1. Process channel commands
         while let Ok(cmd) = self.receiver.try_recv() {
             match cmd {
                 ChatWindowCommand::Show => self.show(),
@@ -238,10 +248,85 @@ impl ChatWindow {
                 ChatWindowCommand::AddMessage(msg) => self.add_message(msg),
             }
         }
+
+        // 2. Update visibility in GhostState
+        self.state.set_chat_visible(self.visible);
+
+        // 3. Handle re-snap when becoming visible
+        if self.visible && !self.was_visible {
+            let (mx, my) = self.state.main_pos();
+            let snap_cfg = self.state.snap_config();
+            self.state.set_chat_snapped(true);
+            let snap_x = mx + snap_cfg.scaled_extra_offset[0];
+            let snap_y = my + snap_cfg.scaled_extra_offset[1];
+            self.set_position(snap_x, snap_y);
+            self.state.set_chat_last_set_pos(snap_x, snap_y);
+        }
+        self.was_visible = self.visible;
+
+        // 4. Follow main window position if snapped
+        if self.visible && self.state.chat_snapped() {
+            let (mx, my) = self.state.main_pos();
+            let snap_cfg = self.state.snap_config();
+            let new_x = mx + snap_cfg.scaled_extra_offset[0];
+            let new_y = my + snap_cfg.scaled_extra_offset[1];
+            let (last_x, last_y) = self.state.chat_last_set_pos();
+            if new_x != last_x || new_y != last_y {
+                self.set_position(new_x, new_y);
+                self.state.set_chat_last_set_pos(new_x, new_y);
+            }
+        }
     }
 
-    /// Handle window events
-    pub fn handle_event(&mut self, event: &WindowEvent) {
+    /// Handle window events (with snap/unsnap detection)
+    pub fn on_event(&mut self, event: &WindowEvent) {
+        // Track resize to suppress false unsnap from OS-generated Moved events
+        if let WindowEvent::Resized(_) = event {
+            self.state.set_chat_just_resized(true);
+        }
+
+        // Detect user-initiated drag: unsnap or re-snap by proximity
+        if let WindowEvent::Moved(position) = event {
+            if self.state.chat_just_resized() {
+                // Resize caused this Moved event — update tracked position, don't unsnap
+                self.state.set_chat_just_resized(false);
+                if self.state.chat_snapped() {
+                    self.state.set_chat_last_set_pos(position.x, position.y);
+                }
+            } else {
+                let (mx, my) = self.state.main_pos();
+                let snap_cfg = self.state.snap_config();
+                let snap_x = mx + snap_cfg.scaled_extra_offset[0];
+                let snap_y = my + snap_cfg.scaled_extra_offset[1];
+
+                if self.state.chat_snapped() {
+                    let (last_x, last_y) = self.state.chat_last_set_pos();
+                    let unsnap_tolerance = 10;
+                    if (position.x - last_x).abs() > unsnap_tolerance
+                        || (position.y - last_y).abs() > unsnap_tolerance
+                    {
+                        self.state.set_chat_snapped(false);
+                        log::info!("Chat window unsnapped");
+                    }
+                } else {
+                    let snap_tolerance = 30;
+                    if (position.x - snap_x).abs() <= snap_tolerance
+                        && (position.y - snap_y).abs() <= snap_tolerance
+                    {
+                        self.state.set_chat_snapped(true);
+                        self.state.set_chat_last_set_pos(snap_x, snap_y);
+                        self.set_position(snap_x, snap_y);
+                        log::info!("Chat window re-snapped");
+                    }
+                }
+            }
+        }
+
+        self.handle_event_inner(event);
+    }
+
+    /// Handle window events (inner, for egui integration)
+    fn handle_event_inner(&mut self, event: &WindowEvent) {
         // Convert tao event to egui input
         match event {
             WindowEvent::Resized(size) => {
@@ -657,12 +742,12 @@ impl ExtraWindow for ChatWindow {
         self.window.id()
     }
 
-    fn handle_event(&mut self, event: &WindowEvent) {
-        ChatWindow::handle_event(self, event);
+    fn on_event(&mut self, event: &WindowEvent) {
+        ChatWindow::on_event(self, event);
     }
 
-    fn process_updates(&mut self) {
-        self.process_commands();
+    fn update(&mut self, delta: f32) {
+        self.update_state(delta);
     }
 
     fn render(&mut self) {

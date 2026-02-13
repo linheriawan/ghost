@@ -1,0 +1,6 @@
+[character]
+name="Min Ah"
+nick="Min Ah"
+animationstate=["idle","talk"]
+image="./MinAh.png"
+loading="Min Ah is getting ready"

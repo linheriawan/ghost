@@ -4,6 +4,7 @@ mod actions;
 mod config;
 mod tray;
 mod ui;
+mod vars;
 mod windows;
 
 use ghost_ui::{skin, AnimatedSkin, EventLoop, GhostWindowBuilder};
@@ -27,6 +28,9 @@ fn main() {
 
     // --- CREATE EVENT LOOP FIRST (required for all windows) ---
     let event_loop = EventLoop::new();
+
+    // --- CREATE SHARED STATE ---
+    let ghost_state = vars::GhostState::new();
 
     // --- CREATE CHAT CHANNEL (window created after skin loading) ---
     let (chat_sender, chat_receiver) = windows::chat_window::create_chat_channel();
@@ -102,6 +106,7 @@ fn main() {
         None,
         chat_size,
         assistant_name,
+        ghost_state.clone(),
     );
     log::info!("Chat window created (hidden) with size {:?}", chat_size);
 
@@ -178,22 +183,35 @@ fn main() {
         chat_sender,
         persona_meta,
         skin_load_rx,
+        ghost_state.clone(),
     );
     main_app.set_menu_ids(tray_components.menu_ids);
     let callout_window_app = windows::callout_window::CalloutWindowApp::new(&config, callout_receiver);
 
     log::info!("Ghost app started with linked callout window and chat");
 
-    // Calculate chat window offset from config (using actual chat size, not config default)
+    // Calculate chat window offset and set snap config in shared state
     let chat_offset = config.chat.calculate_offset_with_size(skin_width, skin_height, chat_size);
     log::info!("Chat window offset: {:?}", chat_offset);
+
+    // Compute scaled offset and store in GhostState for chat snap logic
+    let scale_factor = main_window.window().scale_factor();
+    let scaled_extra_offset = [
+        (chat_offset[0] as f64 * scale_factor) as i32,
+        (chat_offset[1] as f64 * scale_factor) as i32,
+    ];
+    ghost_state.set_snap_config(vars::SnapConfig { scaled_extra_offset });
+
+    // Set initial main window position in state
+    if let Some((x, y)) = main_window.outer_position() {
+        ghost_state.set_main_pos(x, y);
+    }
 
     // Run with linked callout window and chat window
     ghost_ui::run_with_app_callout_and_extra(
         main_window,
         callout_window,
         callout_offset,
-        chat_offset,
         event_loop,
         main_app,
         callout_window_app,

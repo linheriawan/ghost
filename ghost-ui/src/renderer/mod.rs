@@ -2,15 +2,18 @@
 
 mod button;
 mod sprite;
+mod widget;
 
 pub use button::ButtonRenderer;
 pub use sprite::SpritePipeline;
+pub use widget::WidgetRenderer;
 
 use tao::window::Window;
 use thiserror::Error;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration, TextureFormat};
 
 use crate::Skin;
+use widget::WidgetRenderer;
 
 #[derive(Error, Debug)]
 pub enum RendererError {
@@ -346,6 +349,75 @@ impl<'window> Renderer<'window> {
             // Render buttons
             if let Some(btn_renderer) = button_renderer {
                 btn_renderer.render(&mut render_pass);
+            }
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        Ok(())
+    }
+
+    /// Render a skin with widget renderer and app's custom rendering.
+    pub fn render_with_widgets_and_app<'a, A: crate::GhostApp>(
+        &'a mut self,
+        skin: Option<&Skin>,
+        opacity: f32,
+        skin_offset: [f32; 2],
+        widget_renderer: Option<&'a WidgetRenderer>,
+        app: &'a mut A,
+    ) -> Result<(), wgpu::SurfaceError> {
+        let viewport_size = [self.config.width as f32, self.config.height as f32];
+
+        // Prepare sprite pipeline if we have a skin
+        if let Some(skin) = skin {
+            self.sprite_pipeline.prepare(
+                &self.device,
+                &self.queue,
+                skin,
+                opacity,
+                skin_offset,
+                viewport_size,
+            );
+        }
+
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            if skin.is_some() {
+                self.sprite_pipeline.render(&mut render_pass);
+            }
+
+            // Render layers and text overlays (after skin, before widgets)
+            app.render_layers(&self.device, &self.queue, viewport_size, &mut render_pass);
+
+            // Render widgets (solid bg -> images -> text)
+            if let Some(wid_renderer) = widget_renderer {
+                wid_renderer.render(&mut render_pass);
             }
         }
 

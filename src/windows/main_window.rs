@@ -13,6 +13,7 @@ use super::chat_window::{ChatSender, ChatWindowCommand};
 use crate::config::Config;
 use crate::tray::{self, MenuIds, TrayCommand};
 use crate::ui;
+use crate::vars::GhostState;
 
 /// Skin loading state for lazy loading from .persona.zip
 enum SkinLoadState {
@@ -54,6 +55,8 @@ pub struct App {
     needs_gpu_reinit: bool,
     /// Loading indicator overlay
     loading_layer: Option<Layer>,
+    /// Shared state for cross-window coordination
+    state: GhostState,
 }
 
 impl App {
@@ -67,11 +70,13 @@ impl App {
         chat_sender: ChatSender,
         persona_meta: Option<PersonaMeta>,
         skin_load_receiver: Option<mpsc::Receiver<AnimatedSkin>>,
+        state: GhostState,
     ) -> Self {
         let buttons = ui::create_buttons_from_config(&config.buttons);
 
         // Load layers from config
         let mut layers = Vec::new();
+        
         for layer_config in &config.layers {
             let ghost_config = LayerConfig {
                 anchor: LayerAnchor::from_str(&layer_config.anchor),
@@ -86,7 +91,6 @@ impl App {
                 text_offset: layer_config.text_offset,
                 text_padding: layer_config.text_padding,
             };
-
             match Layer::from_path(&layer_config.path, ghost_config) {
                 Ok(mut layer) => {
                     layer.calculate_position(skin_width, skin_height);
@@ -114,7 +118,7 @@ impl App {
         } else {
             SkinLoadState::Static
         };
-
+        
         // Substitute persona placeholders in layer text ({name}, {nick})
         if let Some(ref meta) = persona_meta {
             for layer in &mut layers {
@@ -124,6 +128,17 @@ impl App {
                     }
                 }
             }
+        }else{
+            let mut name_path:String=config.skin.path;
+            name_path=(name_path).split('.').next().unwrap().split('/').last().unwrap();
+            for layer in &mut layers {
+                if let Some(ref mut text) = layer.config.text {
+                    if text.contains("{name}") || text.contains("{nick}") {
+                        *text = text.replace("{name}", name_path).replace("{nick}", name_path);
+                    }
+                }
+            }
+            
         }
 
         // Extract still image data and create loading layer from persona meta
@@ -181,6 +196,7 @@ impl App {
             still_skin_data,
             needs_gpu_reinit: false,
             loading_layer,
+            state,
         }
     }
 
@@ -365,13 +381,17 @@ impl GhostApp for App {
                     }
                 }
             }
-            GhostEvent::Resized(_width, _height) => {
+            GhostEvent::Resized(width, height) => {
                 // Note: Don't update skin_size on resize. The skin dimensions are fixed,
                 // and layers should always be positioned relative to the original skin size.
                 // The resize event may give different values on HiDPI displays.
+                self.state.set_main_size(width, height);
             }
-            GhostEvent::Moved(_x, _y) => {
-                // Main window moved - callout window position is updated by the event loop
+            GhostEvent::Moved(x, y) => {
+                self.state.set_main_pos(x, y);
+            }
+            GhostEvent::FocusChanged(focused) => {
+                self.state.set_main_focused(focused);
             }
             _ => {}
         }

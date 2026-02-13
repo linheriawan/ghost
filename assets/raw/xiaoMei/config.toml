@@ -1,0 +1,6 @@
+[character]
+name="Xiao Mei"
+nick="Mei"
+animationstate=["idle","talk"]
+image="./XiaoMei.png"
+loading="Mei is getting ready"

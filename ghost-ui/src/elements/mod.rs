@@ -3,10 +3,16 @@
 //! Provides interactive UI elements like buttons that can be placed
 //! relative to the ghost window using a bottom-left origin coordinate system.
 
-mod button;
+pub mod button;
+pub mod button_image;
 pub mod callout;
+pub mod label;
+pub mod marquee_label;
 
 pub use button::{Button, ButtonId, ButtonState, ButtonStyle};
+pub use button_image::ButtonImage;
+pub use label::{Label, LabelId, LabelStyle, FontStyle};
+pub use marquee_label::MarqueeLabel;
 
 /// Coordinate origin for widget positioning
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

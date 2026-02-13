@@ -60,7 +60,7 @@ pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
 pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PersonaMeta, PlayMode};
 
 // Renderer
-pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline};
+pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline, WidgetRenderer};
 
 // Layer system
 pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer, TextAlign, TextVAlign};
@@ -73,7 +73,7 @@ pub use window::{
 };
 
 // Elements system
-pub use elements::{Button, ButtonId, ButtonState, ButtonStyle, Origin, Widget};
+pub use elements::{Button, ButtonId, ButtonImage, ButtonState, ButtonStyle, FontStyle, Label, LabelId, LabelStyle, MarqueeLabel, Origin, Widget};
 
 // Callout (merged from ghost-callout)
 pub use elements::callout::{Callout, CalloutBuilder, CalloutShapeRenderer, CalloutTextAnimator, CalloutTextRenderer};
