@@ -357,7 +357,10 @@ impl WidgetRenderer {
         }
     }
 
-    /// Prepare all widgets for rendering
+    /// Prepare all widgets for rendering.
+    ///
+    /// Returns a Vec of (index, text_width) pairs for marquee labels that need
+    /// their text_width updated. The caller should apply these via `set_text_width()`.
     pub fn prepare(
         &mut self,
         device: &Device,
@@ -365,10 +368,10 @@ impl WidgetRenderer {
         buttons: &[&Button],
         button_images: &[&ButtonImage],
         labels: &[&Label],
-        marquees: &mut [&mut MarqueeLabel],
+        marquees: &[&MarqueeLabel],
         viewport: [f32; 2],
         scale_factor: f32,
-    ) {
+    ) -> Vec<(usize, f32)> {
         // Update solid uniforms
         queue.write_buffer(
             &self.solid_uniform_buffer,
@@ -385,7 +388,7 @@ impl WidgetRenderer {
         self.prepare_images(device, queue, button_images, viewport);
 
         // ── 3. Prepare text for all text-bearing widgets ────────
-        self.prepare_text(device, queue, buttons, labels, marquees, viewport, scale_factor);
+        self.prepare_text(device, queue, buttons, labels, marquees, viewport, scale_factor)
     }
 
     /// Generate SDF rounded-rect vertices for Button and Label backgrounds
@@ -502,7 +505,7 @@ impl WidgetRenderer {
     fn prepare_images(
         &mut self,
         device: &Device,
-        queue: &Queue,
+        _queue: &Queue,
         button_images: &[&ButtonImage],
         viewport: [f32; 2],
     ) {
@@ -552,19 +555,21 @@ impl WidgetRenderer {
         }
     }
 
-    /// Prepare text for all text-bearing widgets using glyphon
+    /// Prepare text for all text-bearing widgets using glyphon.
+    ///
+    /// Returns a Vec of (index, text_width) pairs for marquee labels.
     fn prepare_text(
         &mut self,
         device: &Device,
         queue: &Queue,
         buttons: &[&Button],
         labels: &[&Label],
-        marquees: &mut [&mut MarqueeLabel],
+        marquees: &[&MarqueeLabel],
         viewport: [f32; 2],
         _scale_factor: f32,
-    ) {
-        let Some(atlas) = &mut self.text_atlas else { return };
-        let Some(renderer) = &mut self.text_renderer else { return };
+    ) -> Vec<(usize, f32)> {
+        let Some(atlas) = &mut self.text_atlas else { return vec![] };
+        let Some(renderer) = &mut self.text_renderer else { return vec![] };
 
         // Collect all text areas
         self.text_buffers.clear();
@@ -657,7 +662,8 @@ impl WidgetRenderer {
         }
 
         // MarqueeLabel text
-        for marquee in marquees.iter_mut() {
+        let mut marquee_text_widths: Vec<(usize, f32)> = Vec::new();
+        for (idx, marquee) in marquees.iter().enumerate() {
             let label = marquee.label();
             if !label.is_visible() || label.text().is_empty() {
                 continue;
@@ -689,8 +695,8 @@ impl WidgetRenderer {
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(0.0);
 
-            // Update marquee with measured text width
-            marquee.set_text_width(text_width);
+            // Collect text width for caller to apply
+            marquee_text_widths.push((idx, text_width));
 
             // Position text with scroll offset
             let text_height = style.font_size * 1.2;
@@ -725,7 +731,7 @@ impl WidgetRenderer {
                 std::iter::empty::<TextArea>(),
                 &mut self.swash_cache,
             );
-            return;
+            return marquee_text_widths;
         }
 
         // Build text areas from entries + buffers
@@ -771,6 +777,8 @@ impl WidgetRenderer {
         ) {
             log::error!("Failed to prepare widget text: {:?}", e);
         }
+
+        marquee_text_widths
     }
 
     /// Render all prepared widgets

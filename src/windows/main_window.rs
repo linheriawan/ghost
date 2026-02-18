@@ -27,6 +27,14 @@ enum SkinLoadState {
     Static,
 }
 
+/// Visual output from ui_design() — the "what it looks like" for the main window
+struct MainUiDesign {
+    buttons: Vec<Button>,
+    layers: Vec<Layer>,
+    loading_layer: Option<Layer>,
+    still_skin_data: Option<SkinData>,
+}
+
 /// Main application state
 pub struct App {
     config: Config,
@@ -59,6 +67,122 @@ pub struct App {
     state: GhostState,
 }
 
+/// Define "what the main window looks like" — all visual setup in one place.
+///
+/// Receives config values as input and returns the visual components.
+/// This makes visual modifications easier: only look at this one function.
+fn ui_design(
+    config: &Config,
+    skin_width: u32,
+    skin_height: u32,
+    persona_meta: Option<&PersonaMeta>,
+    load_state_is_loading: bool,
+) -> MainUiDesign {
+    // Create buttons from config
+    let buttons = ui::create_buttons_from_config(&config.buttons);
+
+    // Load layers from config
+    let mut layers = Vec::new();
+
+    for layer_config in &config.layers {
+        let ghost_config = LayerConfig {
+            anchor: LayerAnchor::from_str(&layer_config.anchor),
+            offset: layer_config.offset,
+            size: layer_config.size,
+            text: layer_config.text.clone(),
+            text_color: layer_config.text_color,
+            font_size: layer_config.font_size,
+            z_order: layer_config.z_order,
+            text_align: TextAlign::from_str(&layer_config.text_align),
+            text_valign: TextVAlign::from_str(&layer_config.text_valign),
+            text_offset: layer_config.text_offset,
+            text_padding: layer_config.text_padding,
+        };
+        match Layer::from_path(&layer_config.path, ghost_config) {
+            Ok(mut layer) => {
+                layer.calculate_position(skin_width, skin_height);
+                log::info!(
+                    "Loaded layer: {} at position {:?}",
+                    layer_config.path,
+                    layer.position()
+                );
+                layers.push(layer);
+            }
+            Err(e) => {
+                log::error!("Failed to load layer '{}': {}", layer_config.path, e);
+            }
+        }
+    }
+
+    // Sort layers by z_order
+    layers.sort_by_key(|l| l.config.z_order);
+
+    // Substitute persona placeholders in layer text ({name}, {nick})
+    if let Some(meta) = persona_meta {
+        for layer in &mut layers {
+            if let Some(ref mut text) = layer.config.text {
+                if text.contains("{name}") || text.contains("{nick}") {
+                    *text = text.replace("{name}", &meta.name).replace("{nick}", &meta.nick);
+                }
+            }
+        }
+    } else {
+        let name_path = config.skin.path.clone();
+        let name_part = name_path.split('.').next().unwrap().split('/').last().unwrap();
+        for layer in &mut layers {
+            if let Some(ref mut text) = layer.config.text {
+                if text.contains("{name}") || text.contains("{nick}") {
+                    *text = text.replace("{name}", name_part).replace("{nick}", name_part);
+                }
+            }
+        }
+    }
+
+    // Extract still image data and create loading layer from persona meta
+    let (still_skin_data, loading_layer) = if let Some(meta) = persona_meta {
+        let still_data = meta.still_image.clone();
+
+        let loading_layer = if load_state_is_loading {
+            // Create a semi-transparent background bar centered on the character
+            let bar_width = skin_width.min(300);
+            let bar_height = 40u32;
+            if let Ok(bg_data) = SkinData::solid_color(bar_width, bar_height, [0, 0, 0, 180]) {
+                let layer_config = LayerConfig {
+                    anchor: LayerAnchor::Center,
+                    offset: [0.0, 0.0],
+                    size: None,
+                    text: Some(meta.loading_text.clone()),
+                    text_color: [1.0, 1.0, 1.0, 1.0],
+                    font_size: 14.0,
+                    z_order: 100,
+                    text_align: TextAlign::Center,
+                    text_valign: TextVAlign::Center,
+                    text_offset: [0.0, 0.0],
+                    text_padding: [8.0, 8.0, 8.0, 8.0],
+                };
+                let mut layer = Layer::new(bg_data, layer_config);
+                layer.calculate_position(skin_width, skin_height);
+                Some(layer)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        (still_data, loading_layer)
+    } else {
+        (None, None)
+    };
+
+    MainUiDesign {
+        buttons,
+        layers,
+        loading_layer,
+        still_skin_data,
+    }
+}
+
 impl App {
     /// Create new app from configuration
     pub fn new(
@@ -72,44 +196,6 @@ impl App {
         skin_load_receiver: Option<mpsc::Receiver<AnimatedSkin>>,
         state: GhostState,
     ) -> Self {
-        let buttons = ui::create_buttons_from_config(&config.buttons);
-
-        // Load layers from config
-        let mut layers = Vec::new();
-        
-        for layer_config in &config.layers {
-            let ghost_config = LayerConfig {
-                anchor: LayerAnchor::from_str(&layer_config.anchor),
-                offset: layer_config.offset,
-                size: layer_config.size,
-                text: layer_config.text.clone(),
-                text_color: layer_config.text_color,
-                font_size: layer_config.font_size,
-                z_order: layer_config.z_order,
-                text_align: TextAlign::from_str(&layer_config.text_align),
-                text_valign: TextVAlign::from_str(&layer_config.text_valign),
-                text_offset: layer_config.text_offset,
-                text_padding: layer_config.text_padding,
-            };
-            match Layer::from_path(&layer_config.path, ghost_config) {
-                Ok(mut layer) => {
-                    layer.calculate_position(skin_width, skin_height);
-                    log::info!(
-                        "Loaded layer: {} at position {:?}",
-                        layer_config.path,
-                        layer.position()
-                    );
-                    layers.push(layer);
-                }
-                Err(e) => {
-                    log::error!("Failed to load layer '{}': {}", layer_config.path, e);
-                }
-            }
-        }
-
-        // Sort layers by z_order
-        layers.sort_by_key(|l| l.config.z_order);
-
         // Determine load state
         let load_state = if let Some(receiver) = skin_load_receiver {
             SkinLoadState::Loading { receiver }
@@ -118,72 +204,24 @@ impl App {
         } else {
             SkinLoadState::Static
         };
-        
-        // Substitute persona placeholders in layer text ({name}, {nick})
-        if let Some(ref meta) = persona_meta {
-            for layer in &mut layers {
-                if let Some(ref mut text) = layer.config.text {
-                    if text.contains("{name}") || text.contains("{nick}") {
-                        *text = text.replace("{name}", &meta.name).replace("{nick}", &meta.nick);
-                    }
-                }
-            }
-        }else{
-            let mut name_path:String=config.skin.path;
-            name_path=(name_path).split('.').next().unwrap().split('/').last().unwrap();
-            for layer in &mut layers {
-                if let Some(ref mut text) = layer.config.text {
-                    if text.contains("{name}") || text.contains("{nick}") {
-                        *text = text.replace("{name}", name_path).replace("{nick}", name_path);
-                    }
-                }
-            }
-            
-        }
 
-        // Extract still image data and create loading layer from persona meta
-        let (still_skin_data, loading_layer) = if let Some(ref meta) = persona_meta {
-            let still_data = meta.still_image.clone();
+        let load_state_is_loading = matches!(load_state, SkinLoadState::Loading { .. });
 
-            let loading_layer = if matches!(load_state, SkinLoadState::Loading { .. }) {
-                // Create a semi-transparent background bar centered on the character
-                let bar_width = skin_width.min(300);
-                let bar_height = 40u32;
-                if let Ok(bg_data) = SkinData::solid_color(bar_width, bar_height, [0, 0, 0, 180]) {
-                    let layer_config = LayerConfig {
-                        anchor: LayerAnchor::Center,
-                        offset: [0.0, 0.0],
-                        size: None,
-                        text: Some(meta.loading_text.clone()),
-                        text_color: [1.0, 1.0, 1.0, 1.0],
-                        font_size: 14.0,
-                        z_order: 100,
-                        text_align: TextAlign::Center,
-                        text_valign: TextVAlign::Center,
-                        text_offset: [0.0, 0.0],
-                        text_padding: [8.0, 8.0, 8.0, 8.0],
-                    };
-                    let mut layer = Layer::new(bg_data, layer_config);
-                    layer.calculate_position(skin_width, skin_height);
-                    Some(layer)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            (still_data, loading_layer)
-        } else {
-            (None, None)
-        };
+        // Build all visual components via ui_design()
+        let design = ui_design(
+            &config,
+            skin_width,
+            skin_height,
+            persona_meta.as_ref(),
+            load_state_is_loading,
+        );
 
         Self {
             config,
-            buttons,
+            buttons: design.buttons,
             callout_sender,
             skin_size: (skin_width, skin_height),
-            layers,
+            layers: design.layers,
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
             texture_format: None,
@@ -193,9 +231,9 @@ impl App {
             chat_sender,
             load_state,
             still_skin: None,
-            still_skin_data,
+            still_skin_data: design.still_skin_data,
             needs_gpu_reinit: false,
-            loading_layer,
+            loading_layer: design.loading_layer,
             state,
         }
     }

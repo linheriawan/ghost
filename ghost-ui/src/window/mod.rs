@@ -833,6 +833,7 @@ pub fn run_with_app<A: GhostApp + 'static>(
 
                 // Prepare widgets for rendering
                 let viewport = [window_size.width as f32, window_size.height as f32];
+                let mut marquee_widths = Vec::new();
                 if let (Some(ref mut wid_renderer), Some(ref renderer)) =
                     (&mut widget_renderer, &ghost_window.renderer)
                 {
@@ -840,17 +841,26 @@ pub fn run_with_app<A: GhostApp + 'static>(
                     let buttons: Vec<&crate::elements::Button> = app.buttons();
                     let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
                     let labels: Vec<&crate::elements::Label> = app.labels();
-                    let mut marquees: Vec<&mut crate::elements::MarqueeLabel> = app.marquee_labels_mut();
-                    wid_renderer.prepare(
+                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
+                    marquee_widths = wid_renderer.prepare(
                         renderer.device(),
                         renderer.queue(),
                         &buttons,
                         &button_images,
                         &labels,
-                        &mut marquees,
+                        &marquees,
                         viewport,
                         scale_factor,
                     );
+                }
+                // Apply measured text widths to marquee labels
+                if !marquee_widths.is_empty() {
+                    let mut marquees_mut = app.marquee_labels_mut();
+                    for (idx, width) in marquee_widths {
+                        if let Some(m) = marquees_mut.get_mut(idx) {
+                            m.set_text_width(width);
+                        }
+                    }
                 }
 
                 // Let app prepare its rendering (callouts, etc.)
@@ -1211,6 +1221,7 @@ pub fn run_with_app_and_callout<A, C>(
 
                 // Prepare and render main window
                 let viewport = [window_size.width as f32, window_size.height as f32];
+                let mut marquee_widths = Vec::new();
                 if let (Some(ref mut wid_renderer), Some(ref renderer)) =
                     (&mut widget_renderer, &main_window.renderer)
                 {
@@ -1218,17 +1229,25 @@ pub fn run_with_app_and_callout<A, C>(
                     let buttons: Vec<&crate::elements::Button> = app.buttons();
                     let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
                     let labels: Vec<&crate::elements::Label> = app.labels();
-                    let mut marquees: Vec<&mut crate::elements::MarqueeLabel> = app.marquee_labels_mut();
-                    wid_renderer.prepare(
+                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
+                    marquee_widths = wid_renderer.prepare(
                         renderer.device(),
                         renderer.queue(),
                         &buttons,
                         &button_images,
                         &labels,
-                        &mut marquees,
+                        &marquees,
                         viewport,
                         scale_factor,
                     );
+                }
+                if !marquee_widths.is_empty() {
+                    let mut marquees_mut = app.marquee_labels_mut();
+                    for (idx, width) in marquee_widths {
+                        if let Some(m) = marquees_mut.get_mut(idx) {
+                            m.set_text_width(width);
+                        }
+                    }
                 }
 
                 if let Some(ref renderer) = main_window.renderer {
@@ -1315,7 +1334,7 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
     let extra_window_id = extra_window.as_ref().map(|e| e.window_id());
 
     let mut last_frame = Instant::now();
-    let mut button_renderer: Option<crate::renderer::ButtonRenderer> = None;
+    let mut widget_renderer: Option<crate::renderer::WidgetRenderer> = None;
     let mut main_gpu_initialized = false;
     let mut callout_gpu_initialized = false;
 
@@ -1365,6 +1384,9 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                         for button in app.buttons_mut() {
                             button.update_hover(cursor_x, cursor_y, window_height);
                         }
+                        for button_image in app.button_images_mut() {
+                            button_image.update_hover(cursor_x, cursor_y, window_height);
+                        }
                         main_window.request_redraw();
                     }
 
@@ -1372,6 +1394,9 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                         main_window.handle_cursor_left();
                         for button in app.buttons_mut() {
                             button.update_hover(-1.0, -1.0, window_height);
+                        }
+                        for button_image in app.button_images_mut() {
+                            button_image.update_hover(-1.0, -1.0, window_height);
                         }
                     }
 
@@ -1390,6 +1415,14 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                                     break;
                                 }
                             }
+                            if !button_pressed {
+                                for button_image in app.button_images_mut() {
+                                    if button_image.handle_press(cursor_x, cursor_y, window_height) {
+                                        button_pressed = true;
+                                        break;
+                                    }
+                                }
+                            }
                             if !button_pressed && main_window.should_handle_click() && main_window.is_draggable() {
                                 main_window.drag();
                             }
@@ -1405,7 +1438,7 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                         if let Some(cursor_pos) = main_window.cursor_position() {
                             let cursor_x = cursor_pos.x as f32;
                             let cursor_y = cursor_pos.y as f32;
-                            let clicked_ids: Vec<_> = app
+                            let mut clicked_ids: Vec<_> = app
                                 .buttons_mut()
                                 .iter_mut()
                                 .filter_map(|button| {
@@ -1416,6 +1449,18 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                                     }
                                 })
                                 .collect();
+                            let img_clicked_ids: Vec<_> = app
+                                .button_images_mut()
+                                .iter_mut()
+                                .filter_map(|button| {
+                                    if button.handle_release(cursor_x, cursor_y, window_height) {
+                                        Some(button.id())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            clicked_ids.extend(img_clicked_ids);
                             for id in clicked_ids {
                                 app.on_event(GhostEvent::ButtonClicked(id));
                             }
@@ -1476,6 +1521,11 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                 app.on_event(GhostEvent::Update(delta));
                 let callout_changed = callout_app.update(delta);
 
+                // Update marquee label animations
+                for marquee in app.marquee_labels_mut() {
+                    marquee.update(delta);
+                }
+
                 // Update extra window
                 if let Some(ref mut extra) = extra_window {
                     extra.update(delta);
@@ -1510,10 +1560,14 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
 
                 if !main_gpu_initialized {
                     if let Some(ref renderer) = main_window.renderer {
-                        button_renderer = Some(crate::renderer::ButtonRenderer::new(
+                        widget_renderer = Some(crate::renderer::WidgetRenderer::new(
                             renderer.device(),
+                            renderer.queue(),
                             renderer.format(),
                         ));
+                        for btn_img in app.button_images_mut() {
+                            btn_img.init_gpu(renderer.device(), renderer.queue());
+                        }
                         app.init_gpu(GpuResources {
                             device: renderer.device(),
                             queue: renderer.queue(),
@@ -1524,11 +1578,33 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                 }
 
                 let viewport = [window_size.width as f32, window_size.height as f32];
-                if let (Some(ref mut btn_renderer), Some(ref renderer)) =
-                    (&mut button_renderer, &main_window.renderer)
+                let mut marquee_widths = Vec::new();
+                if let (Some(ref mut wid_renderer), Some(ref renderer)) =
+                    (&mut widget_renderer, &main_window.renderer)
                 {
+                    let scale_factor = main_window.window().scale_factor() as f32;
                     let buttons: Vec<&crate::elements::Button> = app.buttons();
-                    btn_renderer.prepare(renderer.device(), renderer.queue(), &buttons, viewport);
+                    let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
+                    let labels: Vec<&crate::elements::Label> = app.labels();
+                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
+                    marquee_widths = wid_renderer.prepare(
+                        renderer.device(),
+                        renderer.queue(),
+                        &buttons,
+                        &button_images,
+                        &labels,
+                        &marquees,
+                        viewport,
+                        scale_factor,
+                    );
+                }
+                if !marquee_widths.is_empty() {
+                    let mut marquees_mut = app.marquee_labels_mut();
+                    for (idx, width) in marquee_widths {
+                        if let Some(m) = marquees_mut.get_mut(idx) {
+                            m.set_text_width(width);
+                        }
+                    }
                 }
 
                 if let Some(ref renderer) = main_window.renderer {
@@ -1537,7 +1613,7 @@ pub fn run_with_app_callout_and_extra<A, C, E>(
                     app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, opacity);
                 }
 
-                let _ = main_window.render_with_buttons_and_app(button_renderer.as_ref(), &mut app);
+                let _ = main_window.render_with_widgets_and_app(widget_renderer.as_ref(), &mut app);
             }
 
             Event::RedrawRequested(window_id) if window_id == callout_window_id => {

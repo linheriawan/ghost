@@ -29,7 +29,7 @@ pub struct CalloutWindowApp {
 
 impl CalloutWindowApp {
     pub fn new(config: &Config, receiver: Receiver<CalloutCommand>) -> Self {
-        let callout = create_callout_from_config(config);
+        let callout = ui_design(config);
         Self {
             callout,
             receiver,
@@ -89,7 +89,8 @@ impl CalloutApp for CalloutWindowApp {
     }
 }
 
-fn create_callout_from_config(config: &Config) -> Callout {
+/// Define "what the callout window looks like" — all visual setup in one place.
+fn ui_design(config: &Config) -> Callout {
     // Create style with configured font size
     let style = CalloutStyle {
         background: config.callout.style.background,

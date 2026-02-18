@@ -14,7 +14,70 @@ use tao::event_loop::EventLoop;
 use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
+use crate::config::ChatConfig;
 use crate::vars::GhostState;
+
+/// Visual theme for the chat window — all "what it looks like" in one place.
+pub struct ChatTheme {
+    // Panel colors
+    pub bg_color: egui::Color32,
+    pub input_panel_bg: egui::Color32,
+    // Widget style overrides
+    pub widget_inactive_bg: egui::Color32,
+    pub widget_hovered_bg: egui::Color32,
+    pub widget_active_bg: egui::Color32,
+    // Message bubbles
+    pub user_bubble_bg: egui::Color32,
+    pub assistant_bubble_bg: egui::Color32,
+    pub bubble_text_color: egui::Color32,
+    pub bubble_rounding: f32,
+    pub bubble_padding: egui::Margin,
+    pub bubble_max_width_ratio: f32,
+    // Role label
+    pub role_label_color: egui::Color32,
+    pub role_label_size: f32,
+    // Message spacing
+    pub message_spacing: f32,
+    // Input area
+    pub input_text_color: egui::Color32,
+    pub input_hint: String,
+    pub input_panel_margin: egui::Margin,
+    // Send button
+    pub send_btn_color: egui::Color32,
+    pub send_btn_text_color: egui::Color32,
+    pub send_btn_rounding: f32,
+    pub send_btn_size: egui::Vec2,
+}
+
+/// Define "what the chat window looks like" — all visual constants in one place.
+///
+/// For now values are code defaults. Having them in ChatTheme makes it easy
+/// to add toml fields later.
+fn ui_design(_config: &ChatConfig) -> ChatTheme {
+    ChatTheme {
+        bg_color: egui::Color32::from_rgb(24, 24, 32),
+        input_panel_bg: egui::Color32::from_rgb(30, 30, 46),
+        widget_inactive_bg: egui::Color32::from_rgb(55, 55, 70),
+        widget_hovered_bg: egui::Color32::from_rgb(65, 65, 80),
+        widget_active_bg: egui::Color32::from_rgb(59, 130, 246),
+        user_bubble_bg: egui::Color32::from_rgb(59, 130, 246),
+        assistant_bubble_bg: egui::Color32::from_rgb(55, 65, 81),
+        bubble_text_color: egui::Color32::WHITE,
+        bubble_rounding: 12.0,
+        bubble_padding: egui::Margin::symmetric(12.0, 8.0),
+        bubble_max_width_ratio: 0.8,
+        role_label_color: egui::Color32::from_rgb(140, 140, 160),
+        role_label_size: 11.0,
+        message_spacing: 12.0,
+        input_text_color: egui::Color32::WHITE,
+        input_hint: "Type a message...".to_string(),
+        input_panel_margin: egui::Margin::symmetric(12.0, 10.0),
+        send_btn_color: egui::Color32::from_rgb(59, 130, 246),
+        send_btn_text_color: egui::Color32::WHITE,
+        send_btn_rounding: 8.0,
+        send_btn_size: egui::vec2(40.0, 32.0),
+    }
+}
 
 /// Message in the chat
 #[derive(Clone, Debug)]
@@ -62,6 +125,8 @@ pub struct ChatWindow {
     state: GhostState,
     /// Track previous visibility for re-snap on show
     was_visible: bool,
+    /// Visual theme (produced by ui_design)
+    theme: ChatTheme,
 }
 
 impl ChatWindow {
@@ -73,6 +138,7 @@ impl ChatWindow {
         size: [u32; 2],
         assistant_name: Option<String>,
         state: GhostState,
+        chat_config: &ChatConfig,
     ) -> Self {
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
@@ -147,6 +213,8 @@ impl ChatWindow {
 
         let assistant_name = assistant_name.unwrap_or_else(|| "Assistant".to_string());
 
+        let theme = ui_design(chat_config);
+
         Self {
             window,
             surface,
@@ -168,6 +236,7 @@ impl ChatWindow {
             assistant_name,
             state,
             was_visible: false,
+            theme,
         }
     }
 
@@ -511,15 +580,39 @@ impl ChatWindow {
         let on_send = self.on_send.clone();
         let assistant_name = self.assistant_name.clone();
 
+        // Extract theme values for use inside the closure
+        let theme = &self.theme;
+        let widget_inactive_bg = theme.widget_inactive_bg;
+        let widget_hovered_bg = theme.widget_hovered_bg;
+        let widget_active_bg = theme.widget_active_bg;
+        let input_panel_bg = theme.input_panel_bg;
+        let input_panel_margin = theme.input_panel_margin;
+        let input_hint = theme.input_hint.clone();
+        let input_text_color = theme.input_text_color;
+        let send_btn_color = theme.send_btn_color;
+        let send_btn_text_color = theme.send_btn_text_color;
+        let send_btn_rounding = theme.send_btn_rounding;
+        let send_btn_size = theme.send_btn_size;
+        let bg_color = theme.bg_color;
+        let user_bubble_bg = theme.user_bubble_bg;
+        let assistant_bubble_bg = theme.assistant_bubble_bg;
+        let bubble_text_color = theme.bubble_text_color;
+        let bubble_rounding = theme.bubble_rounding;
+        let bubble_padding = theme.bubble_padding;
+        let bubble_max_width_ratio = theme.bubble_max_width_ratio;
+        let role_label_color = theme.role_label_color;
+        let role_label_size = theme.role_label_size;
+        let message_spacing = theme.message_spacing;
+
         // New messages to add after the frame
         let mut new_messages: Vec<ChatMessage> = Vec::new();
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Dark theme style overrides
             let mut style = (*ctx.style()).clone();
-            style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(55, 55, 70);
-            style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(65, 65, 80);
-            style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(59, 130, 246);
+            style.visuals.widgets.inactive.bg_fill = widget_inactive_bg;
+            style.visuals.widgets.hovered.bg_fill = widget_hovered_bg;
+            style.visuals.widgets.active.bg_fill = widget_active_bg;
             ctx.set_style(style);
 
             // Bottom panel: input area
@@ -527,17 +620,17 @@ impl ChatWindow {
                 .resizable(false)
                 .min_height(56.0)
                 .frame(egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(30, 30, 46))
-                    .inner_margin(egui::Margin::symmetric(12.0, 10.0)))
+                    .fill(input_panel_bg)
+                    .inner_margin(input_panel_margin))
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         let available = ui.available_width();
 
                         // Styled text input
                         let text_edit = egui::TextEdit::singleline(&mut input_text)
-                            .hint_text("Type a message...")
+                            .hint_text(&input_hint)
                             .desired_width(available - 60.0)
-                            .text_color(egui::Color32::WHITE)
+                            .text_color(input_text_color)
                             .frame(true);
 
                         let response = ui.add(text_edit);
@@ -548,11 +641,11 @@ impl ChatWindow {
 
                         // Accent send button
                         let send_btn = egui::Button::new(
-                            egui::RichText::new(">").color(egui::Color32::WHITE).strong().size(16.0)
+                            egui::RichText::new(">").color(send_btn_text_color).strong().size(16.0)
                         )
-                        .fill(egui::Color32::from_rgb(59, 130, 246))
-                        .rounding(8.0)
-                        .min_size(egui::vec2(40.0, 32.0));
+                        .fill(send_btn_color)
+                        .rounding(send_btn_rounding)
+                        .min_size(send_btn_size);
 
                         let send_clicked = ui.add(send_btn).clicked();
 
@@ -584,7 +677,7 @@ impl ChatWindow {
             // Central panel: messages area
             egui::CentralPanel::default()
                 .frame(egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(24, 24, 32))
+                    .fill(bg_color)
                     .inner_margin(egui::Margin::symmetric(12.0, 8.0)))
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical()
@@ -601,13 +694,13 @@ impl ChatWindow {
                                     &assistant_name
                                 };
 
-                                let bg_color = if is_user {
-                                    egui::Color32::from_rgb(59, 130, 246) // #3b82f6
+                                let msg_bg = if is_user {
+                                    user_bubble_bg
                                 } else {
-                                    egui::Color32::from_rgb(55, 65, 81) // #374151
+                                    assistant_bubble_bg
                                 };
 
-                                let max_bubble_width = panel_width * 0.8;
+                                let max_bubble_width = panel_width * bubble_max_width_ratio;
 
                                 // Layout: right-aligned for user, left-aligned for assistant
                                 if is_user {
@@ -617,19 +710,19 @@ impl ChatWindow {
                                                 // Role label
                                                 ui.label(
                                                     egui::RichText::new(role_label)
-                                                        .color(egui::Color32::from_rgb(140, 140, 160))
-                                                        .size(11.0)
+                                                        .color(role_label_color)
+                                                        .size(role_label_size)
                                                 );
                                                 // Bubble
                                                 egui::Frame::none()
-                                                    .fill(bg_color)
-                                                    .rounding(12.0)
-                                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                                    .fill(msg_bg)
+                                                    .rounding(bubble_rounding)
+                                                    .inner_margin(bubble_padding)
                                                     .show(ui, |ui| {
                                                         ui.set_max_width(max_bubble_width - 24.0);
                                                         ui.label(
                                                             egui::RichText::new(&msg.content)
-                                                                .color(egui::Color32::WHITE)
+                                                                .color(bubble_text_color)
                                                         );
                                                     });
                                             });
@@ -642,26 +735,26 @@ impl ChatWindow {
                                                 // Role label
                                                 ui.label(
                                                     egui::RichText::new(role_label)
-                                                        .color(egui::Color32::from_rgb(140, 140, 160))
-                                                        .size(11.0)
+                                                        .color(role_label_color)
+                                                        .size(role_label_size)
                                                 );
                                                 // Bubble
                                                 egui::Frame::none()
-                                                    .fill(bg_color)
-                                                    .rounding(12.0)
-                                                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                                                    .fill(msg_bg)
+                                                    .rounding(bubble_rounding)
+                                                    .inner_margin(bubble_padding)
                                                     .show(ui, |ui| {
                                                         ui.set_max_width(max_bubble_width - 24.0);
                                                         ui.label(
                                                             egui::RichText::new(&msg.content)
-                                                                .color(egui::Color32::WHITE)
+                                                                .color(bubble_text_color)
                                                         );
                                                     });
                                             });
                                         });
                                     });
                                 }
-                                ui.add_space(12.0);
+                                ui.add_space(message_spacing);
                             }
                         });
                 });

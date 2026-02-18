@@ -13,7 +13,6 @@ use thiserror::Error;
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration, TextureFormat};
 
 use crate::Skin;
-use widget::WidgetRenderer;
 
 #[derive(Error, Debug)]
 pub enum RendererError {

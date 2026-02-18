@@ -107,6 +107,7 @@ fn main() {
         chat_size,
         assistant_name,
         ghost_state.clone(),
+        &config.chat,
     );
     log::info!("Chat window created (hidden) with size {:?}", chat_size);
 
