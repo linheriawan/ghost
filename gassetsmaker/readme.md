@@ -19,14 +19,14 @@ ffmpeg -i ../ghost/assets/xiaoMei_talk0.mp4 -an \
 ./convert_webm.sh ../../ghost/assets/rin_talk.webm 24 ../../ghost/assets/persona/rin/talk
 
 # mp4 -> frame sequence
-ffmpeg -i ../ghost/assets/sasha_idle.mp4 \                         
+ffmpeg -i ./assets/sasha_idle.mp4 \                         
 -vf "fps=24,chromakey=0x00FF00:0.1:0.2, despill=type=green, format=rgba,scale=w='min(512,iw)':h='min(512,ih)':force_original_aspect_ratio=decrease " \
 -pix_fmt rgba \
-../ghost/assets/persona/sasha/idle/frame_%04d.png
+./assets/raw/sasha/idle/frame_%04d.png
 
 # remove transparent pixel
-cargo run -- --path ../ghost/assets/persona/minAh/idle/
+cargo run -p gassetsmaker -- clean ./assets/raw/sasha/idle/
 
 # make zip persona package
-cargo run -p gassetsmaker -- pack assets/persona/sasha/
+cargo run -p gassetsmaker -- pack assets/raw/sasha/
 ```

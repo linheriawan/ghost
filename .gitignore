@@ -1,4 +1,6 @@
 target/
+assets/raw/
+
 **/*.rs.bk
 Cargo.lock
 
