@@ -1,5 +1,9 @@
 target/
 assets/raw/
+**/*.gguf
+**/*.onnx
+**/*.bin
+
 
 **/*.rs.bk
 Cargo.lock

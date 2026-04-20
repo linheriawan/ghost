@@ -1,6 +1,7 @@
 //! Ghost - Desktop mascot with callout bubbles
 
 mod actions;
+mod brain;
 mod config;
 mod tray;
 mod ui;
@@ -34,6 +35,17 @@ fn main() {
 
     // --- CREATE CHAT CHANNEL (window created after skin loading) ---
     let (chat_sender, chat_receiver) = windows::chat_window::create_chat_channel();
+
+    // --- SPAWN BRAIN SERVICE (if configured) ---
+    let (brain_cmd_tx, brain_resp_rx) = if let Some(ref brain_config) = config.brain {
+        log::info!("Brain config found, spawning BrainService...");
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let cmd_tx = brain::BrainService::spawn(brain_config.clone(), resp_tx);
+        (Some(cmd_tx), Some(resp_rx))
+    } else {
+        log::info!("No brain config — chat will echo messages");
+        (None, None)
+    };
 
     // --- 2. SETUP ICONS (tray + dock) ---
     // let mut app_icon = icon_bytes(include_bytes!("../assets/icon.png"));
@@ -108,6 +120,8 @@ fn main() {
         assistant_name,
         ghost_state.clone(),
         &config.chat,
+        brain_cmd_tx,
+        brain_resp_rx,
     );
     log::info!("Chat window created (hidden) with size {:?}", chat_size);
 

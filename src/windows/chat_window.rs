@@ -14,6 +14,7 @@ use tao::event_loop::EventLoop;
 use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
+use crate::brain::{BrainCommand, BrainResponse};
 use crate::config::ChatConfig;
 use crate::vars::GhostState;
 
@@ -127,6 +128,22 @@ pub struct ChatWindow {
     was_visible: bool,
     /// Visual theme (produced by ui_design)
     theme: ChatTheme,
+    /// Accumulated egui events between frames (drained into RawInput each render).
+    pending_events: Vec<egui::Event>,
+    /// Current modifier key state.
+    modifiers: egui::Modifiers,
+    /// Whether the window currently has focus.
+    focused: bool,
+    /// Channel to send commands to the brain (LLM).
+    brain_tx: Option<Sender<BrainCommand>>,
+    /// Channel to receive responses from the brain.
+    brain_rx: Option<Receiver<BrainResponse>>,
+    /// Whether we're waiting for the brain to reply.
+    waiting_for_brain: bool,
+    /// Whether voice mode is active (mic → STT → LLM → TTS).
+    voice_mode: bool,
+    /// Voice status string shown in UI when in voice mode.
+    voice_status: String,
 }
 
 impl ChatWindow {
@@ -139,6 +156,8 @@ impl ChatWindow {
         assistant_name: Option<String>,
         state: GhostState,
         chat_config: &ChatConfig,
+        brain_tx: Option<Sender<BrainCommand>>,
+        brain_rx: Option<Receiver<BrainResponse>>,
     ) -> Self {
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
@@ -237,6 +256,14 @@ impl ChatWindow {
             state,
             was_visible: false,
             theme,
+            pending_events: Vec::new(),
+            modifiers: egui::Modifiers::NONE,
+            focused: false,
+            brain_tx,
+            brain_rx,
+            waiting_for_brain: false,
+            voice_mode: false,
+            voice_status: "Listening...".to_string(),
         }
     }
 
@@ -318,6 +345,89 @@ impl ChatWindow {
             }
         }
 
+        // 1b. Poll brain responses
+        if let Some(ref brain_rx) = self.brain_rx {
+            loop {
+                match brain_rx.try_recv() {
+                    Ok(resp) => match resp {
+                        BrainResponse::ChatToken { token } => {
+                            if self.waiting_for_brain {
+                                // Create the assistant bubble on the first token.
+                                let last_is_assistant = self
+                                    .messages
+                                    .last()
+                                    .map(|m| m.role == "assistant")
+                                    .unwrap_or(false);
+                                if !last_is_assistant {
+                                    self.messages.push(ChatMessage {
+                                        role: "assistant".to_string(),
+                                        content: token,
+                                    });
+                                } else if let Some(last) = self.messages.last_mut() {
+                                    last.content.push_str(&token);
+                                }
+                                self.needs_repaint = true;
+                            }
+                        }
+                        BrainResponse::ChatDone => {
+                            self.waiting_for_brain = false;
+                            if self.voice_mode {
+                                self.voice_status = "Listening...".to_string();
+                            }
+                            self.needs_repaint = true;
+                        }
+                        BrainResponse::Error { message } => {
+                            self.messages.push(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: format!("[Error] {}", message),
+                            });
+                            self.waiting_for_brain = false;
+                            self.needs_repaint = true;
+                        }
+                        BrainResponse::SpeechReady { samples, sample_rate } => {
+                            // Play TTS audio in a background thread so UI doesn't block.
+                            crate::brain::audio::play_samples_async(samples, sample_rate);
+                        }
+                        BrainResponse::Transcription { text } => {
+                            // STT result in voice mode — auto-submit as user message.
+                            self.messages.push(ChatMessage {
+                                role: "user".to_string(),
+                                content: text.clone(),
+                            });
+                            self.voice_status = "Thinking...".to_string();
+                            if let Some(ref tx) = self.brain_tx {
+                                let _ = tx.send(BrainCommand::Chat { message: text });
+                                self.waiting_for_brain = true;
+                            }
+                            self.needs_repaint = true;
+                        }
+                        BrainResponse::VoiceModeChanged(on) => {
+                            self.voice_mode = on;
+                            self.voice_status = if on { "Listening  ░░░░░░░░░░".to_string() } else { String::new() };
+                            self.needs_repaint = true;
+                        }
+                        BrainResponse::VoiceStatus(status) => {
+                            self.voice_status = status;
+                            self.needs_repaint = true;
+                        }
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // Brain thread died — clear waiting state and notify user
+                        if self.waiting_for_brain {
+                            self.messages.push(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: "[Brain disconnected]".to_string(),
+                            });
+                            self.waiting_for_brain = false;
+                            self.needs_repaint = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // 2. Update visibility in GhostState
         self.state.set_chat_visible(self.visible);
 
@@ -394,9 +504,13 @@ impl ChatWindow {
         self.handle_event_inner(event);
     }
 
-    /// Handle window events (inner, for egui integration)
+    /// Handle window events (inner, for egui integration).
+    ///
+    /// Events are accumulated in `self.pending_events` and drained into
+    /// `RawInput` at the start of each `render()` call.  This avoids the
+    /// problem where `ctx.run(raw_input, ...)` discards events that were
+    /// pushed via `ctx.input_mut()` between frames.
     fn handle_event_inner(&mut self, event: &WindowEvent) {
-        // Convert tao event to egui input
         match event {
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
@@ -412,7 +526,6 @@ impl ChatWindow {
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == tao::event::ElementState::Pressed;
 
-                // Convert tao KeyCode to egui key
                 use tao::keyboard::KeyCode;
                 let egui_key = match event.physical_key {
                     KeyCode::Escape => Some(egui::Key::Escape),
@@ -437,53 +550,45 @@ impl ChatWindow {
                     _ => None,
                 };
 
-                self.egui_ctx.input_mut(|i| {
-                    // Send key event
-                    if let Some(key) = egui_key {
-                        i.events.push(egui::Event::Key {
-                            key,
-                            physical_key: None,
-                            pressed,
-                            repeat: event.repeat,
-                            modifiers: i.modifiers,
-                        });
-                    }
+                if let Some(key) = egui_key {
+                    self.pending_events.push(egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed,
+                        repeat: event.repeat,
+                        modifiers: self.modifiers,
+                    });
+                }
 
-                    // Send text event for printable characters (only on press)
-                    if pressed {
-                        if let Some(text) = event.text {
-                            // Don't send text for control characters
-                            if !text.chars().all(|c| c.is_control()) {
-                                i.events.push(egui::Event::Text(text.to_string()));
-                            }
+                // Text event for printable characters (only on press)
+                if pressed {
+                    if let Some(text) = event.text {
+                        if !text.chars().all(|c| c.is_control()) {
+                            self.pending_events
+                                .push(egui::Event::Text(text.to_string()));
                         }
                     }
-                });
+                }
                 self.needs_repaint = true;
             }
             WindowEvent::ModifiersChanged(modifiers) => {
-                self.egui_ctx.input_mut(|i| {
-                    i.modifiers.alt = modifiers.alt_key();
-                    i.modifiers.ctrl = modifiers.control_key();
-                    i.modifiers.shift = modifiers.shift_key();
-                    i.modifiers.mac_cmd = modifiers.super_key();
-                    i.modifiers.command = if cfg!(target_os = "macos") {
-                        modifiers.super_key()
-                    } else {
-                        modifiers.control_key()
-                    };
-                });
+                self.modifiers.alt = modifiers.alt_key();
+                self.modifiers.ctrl = modifiers.control_key();
+                self.modifiers.shift = modifiers.shift_key();
+                self.modifiers.mac_cmd = modifiers.super_key();
+                self.modifiers.command = if cfg!(target_os = "macos") {
+                    modifiers.super_key()
+                } else {
+                    modifiers.control_key()
+                };
             }
             WindowEvent::CursorMoved { position, .. } => {
-                // Convert physical pixels to logical pixels
                 let scale_factor = self.window.scale_factor() as f32;
                 let pos = egui::pos2(
                     position.x as f32 / scale_factor,
                     position.y as f32 / scale_factor,
                 );
-                self.egui_ctx.input_mut(|i| {
-                    i.events.push(egui::Event::PointerMoved(pos));
-                });
+                self.pending_events.push(egui::Event::PointerMoved(pos));
                 self.needs_repaint = true;
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -494,20 +599,29 @@ impl ChatWindow {
                     tao::event::MouseButton::Middle => egui::PointerButton::Middle,
                     _ => return,
                 };
-                self.egui_ctx.input_mut(|i| {
-                    i.events.push(egui::Event::PointerButton {
-                        pos: i.pointer.latest_pos().unwrap_or_default(),
-                        button: egui_button,
-                        pressed,
-                        modifiers: i.modifiers,
-                    });
+                // Use the most recent pointer position we know about
+                let pos = self
+                    .pending_events
+                    .iter()
+                    .rev()
+                    .find_map(|e| {
+                        if let egui::Event::PointerMoved(p) = e {
+                            Some(*p)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                self.pending_events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui_button,
+                    pressed,
+                    modifiers: self.modifiers,
                 });
                 self.needs_repaint = true;
             }
             WindowEvent::Focused(focused) => {
-                self.egui_ctx.input_mut(|i| {
-                    i.focused = *focused;
-                });
+                self.focused = *focused;
                 self.needs_repaint = true;
             }
             _ => {}
@@ -571,6 +685,9 @@ impl ChatWindow {
             )),
             time: Some(self.start_time.elapsed().as_secs_f64()),
             predicted_dt: 1.0 / 60.0,
+            events: std::mem::take(&mut self.pending_events),
+            modifiers: self.modifiers,
+            focused: self.focused,
             ..Default::default()
         };
 
@@ -578,7 +695,11 @@ impl ChatWindow {
         let messages = self.messages.clone();
         let mut input_text = std::mem::take(&mut self.input_text);
         let on_send = self.on_send.clone();
+        let brain_tx = self.brain_tx.clone();
+        let waiting_for_brain = self.waiting_for_brain;
         let assistant_name = self.assistant_name.clone();
+        let voice_mode = self.voice_mode;
+        let voice_status = self.voice_status.clone();
 
         // Extract theme values for use inside the closure
         let theme = &self.theme;
@@ -606,6 +727,8 @@ impl ChatWindow {
 
         // New messages to add after the frame
         let mut new_messages: Vec<ChatMessage> = Vec::new();
+        // Voice mode toggle requested this frame
+        let mut new_voice_mode: Option<bool> = None;
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Dark theme style overrides
@@ -623,54 +746,107 @@ impl ChatWindow {
                     .fill(input_panel_bg)
                     .inner_margin(input_panel_margin))
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        let available = ui.available_width();
-
-                        // Styled text input
-                        let text_edit = egui::TextEdit::singleline(&mut input_text)
-                            .hint_text(&input_hint)
-                            .desired_width(available - 60.0)
-                            .text_color(input_text_color)
-                            .frame(true);
-
-                        let response = ui.add(text_edit);
-
-                        // Send on Enter key
-                        let enter_pressed =
-                            response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                        // Accent send button
-                        let send_btn = egui::Button::new(
-                            egui::RichText::new(">").color(send_btn_text_color).strong().size(16.0)
-                        )
-                        .fill(send_btn_color)
-                        .rounding(send_btn_rounding)
-                        .min_size(send_btn_size);
-
-                        let send_clicked = ui.add(send_btn).clicked();
-
-                        if (enter_pressed || send_clicked) && !input_text.trim().is_empty() {
-                            let user_msg = input_text.trim().to_string();
-
-                            new_messages.push(ChatMessage {
-                                role: "user".to_string(),
-                                content: user_msg.clone(),
+                    ui.vertical(|ui| {
+                        // Voice status bar (shown only in voice mode)
+                        if voice_mode {
+                            ui.horizontal(|ui| {
+                                let status_color = if waiting_for_brain {
+                                    egui::Color32::from_rgb(250, 200, 60)
+                                } else {
+                                    egui::Color32::from_rgb(60, 220, 120)
+                                };
+                                ui.label(
+                                    egui::RichText::new(&voice_status)
+                                        .color(status_color)
+                                        .size(12.0)
+                                        .italics()
+                                );
                             });
+                            ui.add_space(4.0);
+                        }
 
-                            if let Some(ref sender) = on_send {
-                                let _ = sender.send(user_msg.clone());
+                        ui.horizontal(|ui| {
+                            let available = ui.available_width();
+                            // Reserve space: voice toggle (44px) + send (44px) + gaps
+                            let reserved = if voice_mode { 54.0 } else { 98.0 };
+
+                            if !voice_mode {
+                                // Text input (hidden in voice mode — mic is the input)
+                                let text_edit = egui::TextEdit::singleline(&mut input_text)
+                                    .hint_text(&input_hint)
+                                    .desired_width(available - reserved)
+                                    .text_color(input_text_color)
+                                    .frame(true);
+
+                                let response = ui.add(text_edit);
+
+                                let enter_pressed = response.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                                // Send button
+                                let send_btn = egui::Button::new(
+                                    egui::RichText::new(">").color(send_btn_text_color).strong().size(16.0)
+                                )
+                                .fill(send_btn_color)
+                                .rounding(send_btn_rounding)
+                                .min_size(send_btn_size);
+
+                                let send_clicked = ui.add(send_btn).clicked();
+
+                                if (enter_pressed || send_clicked)
+                                    && !input_text.trim().is_empty()
+                                    && !waiting_for_brain
+                                {
+                                    let user_msg = input_text.trim().to_string();
+
+                                    new_messages.push(ChatMessage {
+                                        role: "user".to_string(),
+                                        content: user_msg.clone(),
+                                    });
+
+                                    if let Some(ref sender) = on_send {
+                                        let _ = sender.send(user_msg.clone());
+                                    }
+
+                                    if let Some(ref tx) = brain_tx {
+                                        let _ = tx.send(BrainCommand::Chat { message: user_msg });
+                                    } else {
+                                        new_messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: format!(
+                                                "You said: \"{}\" (No brain configured)",
+                                                user_msg
+                                            ),
+                                        });
+                                    }
+
+                                    input_text.clear();
+                                }
+                            } else {
+                                // In voice mode: expand status space, no text input
+                                ui.add_space(available - reserved);
                             }
 
-                            new_messages.push(ChatMessage {
-                                role: "assistant".to_string(),
-                                content: format!(
-                                    "You said: \"{}\" (AI integration coming soon!)",
-                                    user_msg
-                                ),
-                            });
+                            // Voice toggle button  [Text] / [Mic]
+                            let (toggle_label, toggle_color) = if voice_mode {
+                                ("Mic", egui::Color32::from_rgb(220, 60, 60))
+                            } else {
+                                ("Text", egui::Color32::from_rgb(80, 80, 100))
+                            };
+                            let voice_btn = egui::Button::new(
+                                egui::RichText::new(toggle_label).size(12.0).strong()
+                            )
+                            .fill(toggle_color)
+                            .rounding(send_btn_rounding)
+                            .min_size(egui::vec2(44.0, 32.0));
 
-                            input_text.clear();
-                        }
+                            if ui.add(voice_btn).clicked() {
+                                if let Some(ref tx) = brain_tx {
+                                    let _ = tx.send(BrainCommand::SetVoiceMode(!voice_mode));
+                                }
+                                new_voice_mode = Some(!voice_mode);
+                            }
+                        });
                     });
                 });
 
@@ -756,13 +932,50 @@ impl ChatWindow {
                                 }
                                 ui.add_space(message_spacing);
                             }
+
+                            // Show "thinking..." indicator when waiting for brain
+                            if waiting_for_brain {
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                                    ui.allocate_ui(egui::vec2(panel_width * bubble_max_width_ratio, 0.0), |ui| {
+                                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(&assistant_name)
+                                                    .color(role_label_color)
+                                                    .size(role_label_size)
+                                            );
+                                            egui::Frame::none()
+                                                .fill(assistant_bubble_bg)
+                                                .rounding(bubble_rounding)
+                                                .inner_margin(bubble_padding)
+                                                .show(ui, |ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("thinking...")
+                                                            .color(egui::Color32::from_rgb(160, 160, 180))
+                                                            .italics()
+                                                    );
+                                                });
+                                        });
+                                    });
+                                });
+                                ui.add_space(message_spacing);
+                            }
                         });
                 });
         });
 
         // Update state with new messages and input
+        let sent_to_brain = new_messages.iter().any(|m| m.role == "user")
+            && self.brain_tx.is_some()
+            && new_messages.iter().all(|m| m.role != "assistant");
         self.messages.extend(new_messages);
+        if sent_to_brain {
+            self.waiting_for_brain = true;
+        }
         self.input_text = input_text;
+        if let Some(vm) = new_voice_mode {
+            self.voice_mode = vm;
+            self.voice_status = if vm { "Listening...".to_string() } else { String::new() };
+        }
 
         // Handle repaint requests - check if there are pending animations
         if !full_output.shapes.is_empty() {

@@ -3,6 +3,8 @@ name = "ROSEGUI"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
 eframe = "0.24" # Or latest
 egui = "0.24"

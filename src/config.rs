@@ -16,6 +16,38 @@ pub struct Config {
     pub buttons: Vec<ButtonConfig>,
     #[serde(default)]
     pub layers: Vec<LayerConfig>,
+    /// Brain (LLM / TTS / STT) configuration — optional.
+    pub brain: Option<BrainConfig>,
+}
+
+/// Brain module configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct BrainConfig {
+    /// Path to the GGUF model file
+    pub llm_model: String,
+    /// Context window size (default 4096)
+    pub context_size: Option<u32>,
+    /// Number of layers to offload to GPU (0 = CPU only, default 0)
+    pub gpu_layers: Option<u32>,
+    /// System prompt for the LLM
+    pub system_prompt: Option<String>,
+    // --- TTS (Kokoro ONNX) ---
+    /// Path to the Kokoro ONNX model file (model.onnx)
+    pub tts_model: Option<String>,
+    /// Path to the voice style binary (e.g. af_bella.bin)
+    pub tts_voice: Option<String>,
+    /// Path to the Kokoro tokenizer.json
+    pub tts_tokenizer: Option<String>,
+    /// espeak-ng language code: "a"=en-us, "b"=en-gb, "id"=id, etc.
+    pub tts_lang: Option<String>,
+    // --- STT (Whisper ONNX) ---
+    /// Path to Whisper ONNX encoder model (encoder_model.onnx)
+    pub stt_encoder: Option<String>,
+    /// Path to Whisper ONNX decoder model (decoder_model_merged.onnx)
+    pub stt_decoder: Option<String>,
+    /// Legacy field — kept for config compatibility, unused
+    #[serde(default)]
+    pub stt_model: Option<String>,
 }
 
 /// Main window startup configuration

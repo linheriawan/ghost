@@ -72,11 +72,16 @@ impl CalloutApp for CalloutWindowApp {
     }
 
     fn update(&mut self, delta: f32) -> bool {
-        // Process any pending commands
-        let had_commands = self.receiver.try_recv().is_ok();
-        if had_commands {
-            // Re-process including the one we just peeked
-            self.process_commands();
+        // Process all pending commands
+        let mut had_commands = false;
+        while let Ok(cmd) = self.receiver.try_recv() {
+            had_commands = true;
+            match cmd {
+                CalloutCommand::Say(text) => self.callout.say(text),
+                CalloutCommand::Think(text) => self.callout.think(text),
+                CalloutCommand::Scream(text) => self.callout.scream(text),
+                CalloutCommand::Hide => self.callout.hide(),
+            }
         }
 
         // Update callout animation - returns true if animation is active
@@ -135,18 +140,34 @@ pub fn create_callout_channel() -> (CalloutSender, Receiver<CalloutCommand>) {
     mpsc::channel()
 }
 
-/// Calculate callout window offset from main window based on config
+/// Calculate callout window offset from main window based on config.
+///
+/// For right-side anchors the callout extends LEFT so it stays on-screen.
+/// For bottom-side anchors the callout extends UP.
 pub fn calculate_callout_offset(config: &Config, skin_width: u32, skin_height: u32) -> [i32; 2] {
     let anchor = Anchor::from_str(&config.callout.anchor);
     let (anchor_x, anchor_y) = anchor.as_fraction();
 
-    // Calculate base position from anchor
-    let base_x = skin_width as f32 * anchor_x;
-    let base_y = skin_height as f32 * anchor_y;
+    let callout_size = calculate_callout_size(config);
 
-    // Apply offset
-    let x = base_x + config.callout.offset[0];
-    let y = base_y + config.callout.offset[1];
+    // Calculate base position from anchor
+    let mut x = skin_width as f32 * anchor_x;
+    let mut y = skin_height as f32 * anchor_y;
+
+    // For right-side anchors, shift left by callout width so the bubble
+    // extends leftward from the anchor instead of off-screen to the right.
+    if anchor_x > 0.5 {
+        x -= callout_size.0 as f32;
+    }
+
+    // For bottom-side anchors, shift up by callout height
+    if anchor_y > 0.5 {
+        y -= callout_size.1 as f32;
+    }
+
+    // Apply user offset
+    x += config.callout.offset[0];
+    y += config.callout.offset[1];
 
     [x as i32, y as i32]
 }

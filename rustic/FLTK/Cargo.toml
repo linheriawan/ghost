@@ -3,6 +3,8 @@ name = "ROSFLTK"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
 fltk = "1.4"
 tray-item = "0.8"
