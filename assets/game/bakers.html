@@ -5,16 +5,55 @@
     <meta name="description" content="Baker's is IC_Troo way to simplyfy the game using configurable tableau counts.">
 </head>
 <style>
-    .tl_ico { top:.31em; left:.31em }
-    .br_ico { bottom:.31em; right:.31em; transform:rotate(180deg) }
+    .viewport.ortho{perspective: 70vw; perspective-origin: 50% 50%;}
+    .viewport.ortho>#tableau{transform: rotateX(60deg) scale(0.4,1.3); transform-origin: top center;}
+    #foundation .card, #cells .card{width: 100px;height: 140px;}
+    #foundation span,
+    #cells span{ font-size: 16px !important;}
+
+    .tl_ico { top:0; left:0; background:white; padding:.3em .3em;}
+    .br_ico { bottom:0; right:0; background:white; padding:.3em .3em; transform:rotate(180deg) }
     .card { cursor:pointer; box-sizing:border-box; background:white; border-radius:.375rem; }
     .sel  { outline:3px solid #60a5fa; outline-offset:-2px; }
     .btn-ctrl { color:white; font-size:.7rem; padding:.25rem .6rem; border-radius:.375rem; background:rgba(255,255,255,.2); border:none; cursor:pointer; }
     .btn-ctrl:hover:not(:disabled) { background:rgba(255,255,255,.3); }
     .btn-ctrl:disabled { opacity:.3; cursor:default; }
+
+    .rank-4>span:nth-child(1),.rank-5>span:nth-child(1),
+    .rank-6>span:nth-child(1),.rank-7>span:nth-child(1),.rank-8>span:nth-child(1) { grid-area: 1 / 1; } /* r-5 Top Left */
+
+    .rank-4>span:nth-child(2),.rank-5>span:nth-child(2),
+    .rank-6>span:nth-child(2),.rank-7>span:nth-child(2),.rank-8>span:nth-child(2) { grid-area: 1 / 3; } /* r-5 Top Right */
+
+    .rank-5>span:nth-child(5) { grid-area: 3 / 2; } 
+    
+    .rank-6>span:nth-child(3),.rank-7>span:nth-child(3),.rank-8>span:nth-child(3) { grid-area: 3 / 1; } /* r-5 Mid Left */
+
+    .rank-6>span:nth-child(4),.rank-7>span:nth-child(4),.rank-8>span:nth-child(4)  { grid-area: 3 / 3; } /* r-5 Mid Right */
+
+    .rank-4>span:nth-child(3),.rank-5>span:nth-child(3),
+    .rank-6>span:nth-child(5),.rank-7>span:nth-child(5),.rank-8>span:nth-child(5)  { grid-area: 5 / 1; } /* r-5 Bottom Left */
+
+    .rank-4>span:nth-child(4),.rank-5>span:nth-child(4), 
+    .rank-6>span:nth-child(6),.rank-7>span:nth-child(6),.rank-8>span:nth-child(6) { grid-area: 5 / 3; } /* r-5 Bottom Right */
+
+    .rank-8>span:nth-child(7),.rank-7>span:nth-child(7) { grid-area: 2 / 2; }
+    .rank-8>span:nth-child(8),.rank-9>span:nth-child(9) { grid-area: 4 / 2; }
+    
+    .rank-9>span:nth-child(1),.rank-10>span:nth-child(1) { grid-area: 1 / 1; }
+    .rank-9>span:nth-child(2),.rank-10>span:nth-child(2) { grid-area: 3 / 1; }
+    .rank-9>span:nth-child(3),.rank-10>span:nth-child(3) { grid-area: 5 / 1; }
+    .rank-9>span:nth-child(4),.rank-10>span:nth-child(4) { grid-area: 7 / 1; }
+    .rank-9>span:nth-child(5),.rank-10>span:nth-child(5) { grid-area: 1 / 3; }
+    .rank-9>span:nth-child(6),.rank-10>span:nth-child(6) { grid-area: 3 / 3; }
+    .rank-9>span:nth-child(7),.rank-10>span:nth-child(7) { grid-area: 5 / 3; }
+    .rank-9>span:nth-child(8),.rank-10>span:nth-child(8) { grid-area: 7 / 3; }
+
+    .rank-10>span:nth-child(9) { grid-area: 2 / 2; }
+    .rank-10>span:nth-child(10) { grid-area: 6 / 2; }
 </style>
-<body class="p-0 m-0 select-none" style="height:100vh;overflow:hidden;background:#166534">
-<div style="display:grid;grid-template-rows:auto 1fr;height:100vh;gap:8px;padding:8px">
+<body class="p-0 m-0 select-none h-full overflow-hidden" style="background:#166534">
+<div class="grid grid-rows-[auto_1fr] h-full gap-1 p-2">
     <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">
         <div id="cells" class="flex gap-2 justify-start"></div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
@@ -23,10 +62,13 @@
                 <button id="btn-undo" class="btn-ctrl" disabled>↩ Undo</button>
                 <button id="btn-redo" class="btn-ctrl" disabled>Redo ↪</button>
             </div>
+            <div class="text-green-600"> <input id="toggle-ortho" type="checkbox" name="projection" /> Perspective </div>
         </div>
         <div id="foundation" class="flex gap-2 justify-end"></div>
     </div>
-    <div id="tableau" style="display:flex;gap:8px;width:100%;align-items:flex-start;overflow-y:auto"></div>
+    <div class="viewport">
+        <div id="tableau" class="flex gap-1 w-full items-start overflow-auto"></div>
+    </div>
 </div>
 
 <div id="win-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="z-index:50;background:rgba(0,0,0,.6)">
@@ -47,24 +89,29 @@ const OVERLAP = Math.floor(card_h * 0.28)
 const tableau_box    = document.getElementById('tableau')
 const cells_box      = document.getElementById('cells')
 const foundation_box = document.getElementById('foundation')
+const btn_new      = document.getElementById('btn-new')
 const btn_undo       = document.getElementById('btn-undo')
 const btn_redo       = document.getElementById('btn-redo')
+const btn_persp      = document.getElementById('toggle-ortho')
 
-const SLOT_BASE = `flex-shrink:0;position:relative;border:1px solid rgba(255,255,255,.3);border-radius:.375rem;display:flex;align-items:center;justify-content:center`
+const sCard_w=100,sCard_h=140
+const SLOT_BASE = `w-[${sCard_w}px] h-[${sCard_h}px] relative rounded border border-green-600 flex items-center justify-center`
 
 for(let x=0; x<4; x++){
     const box=document.createElement('div')
-    box.style.cssText=`width:${card_w}px;height:${card_h}px;${SLOT_BASE}`
+    box.className=SLOT_BASE
+    box.style.cssText=`flex-shrink:0;`
     foundation_box.append(box)
 }
 for(let x=0; x<cellcount; x++){
     const box=document.createElement('div')
-    box.style.cssText=`width:${card_w}px;height:${card_h}px;${SLOT_BASE}`
+    box.className=SLOT_BASE
+    box.style.cssText=`flex-shrink:0;`
     cells_box.append(box)
 }
 for(let x=0; x<tableaucount; x++){
     const box=document.createElement('div')
-    box.style.cssText=`flex:1;min-height:${card_h}px;position:relative;border:1px solid rgba(255,255,255,.3);border-radius:.375rem`
+    box.className=`flex-1 relative rounded border border-green-600 min-h-[${card_h}px]`
     tableau_box.append(box)
 }
 
@@ -255,29 +302,43 @@ function handleCardDblClick(e, col, cardIdx){
 // ── Render ────────────────────────────────────────────────────────────────────
 function makeCardEl(id, selected){
     const shp=suit(id), no=rank(id), ri=rankIdx(id)
-    const color =isRed(id)?'#dc2626':'#334155'
-    const border=isRed(id)?'#fca5a5':'#94a3b8'
+    const color =isRed(id)?'text-red-600':'text-gray-900'
+    const border=isRed(id)?'border border-red-300':'border border-gray-300'
     const fs = Math.floor(card_w*.14)
 
     const card=document.createElement('div')
-    card.className='card'+(selected?' sel':'')
-    card.style.cssText=`position:absolute;width:${card_w}px;height:${card_h}px;border:1px solid ${border};box-shadow:0 1px 3px rgba(0,0,0,.25)`
+    card.className=`card ${selected?'sel':''} shadow-md absolute ${border} w-full h-full max-w-[${card_w}px] max-h-[${card_h}px] flex items-center justify-center`
 
     const inner=document.createElement('div')
-    inner.style.cssText=`display:grid;grid-template-columns:1fr 1fr;border:1px solid #e5e7eb;border-radius:4px;overflow:hidden;margin:${Math.floor(card_h*.17)}px ${Math.floor(card_w*.1)}px;height:${Math.floor(card_h*.52)}px`
-    for(let x=0; x<ri; x++){
-        const pip=document.createElement('div')
-        pip.style.cssText=`display:flex;align-items:center;justify-content:center;font-size:${Math.floor(card_w*.15)}px;color:${color}`
-        pip.textContent=shp
-        inner.append(pip)
+    const grid=['🤹🏻','J','Q','K'].indexOf(no)> -1 ? `rounded-xl ${border} grid-cols-1 overflow-hidden` 
+        : ['A','2','3'].indexOf(no)> -1 ? `grid-cols-1` 
+        : (['9','10'].indexOf(no)> -1 ? `rank-${no} grid-cols-3 grid-rows-7 px-5 py-2` : `rank-${no} grid-cols-3 grid-rows-5 px-5 py-2`) 
+        
+    inner.className=`grid ${grid} h-[${Math.floor(card_h*.85)}px] w-[${Math.floor(card_w*.8)}px] items-center justify-center`
+    if(['🤹🏻','J','Q','K'].indexOf(no)> -1){
+        const ima=document.createElement('img')
+        ima.className="object-cover object-center"
+        switch(no){
+            case 'J': ima.src='c_jack.png'; break;
+            case 'Q': ima.src='c_queen.png';break;
+            case 'K': ima.src='c_king.png';break;
+            default: ima.src='c_joker.png'; break;
+        } inner.append(ima)
+    }else{
+        for(let x=0; x<ri; x++){
+            const pip=document.createElement('span')
+            const ts=no=='A' ? Math.floor(card_w*.3) : Math.floor(card_w*.15);
+            pip.className=`flex items-center justify-center text-[${ts}px] ${no=='A'?'text-shadow-lg':''}`
+            pip.textContent=shp
+            inner.append(pip)
+        }
     }
-
+    
     const tl=document.createElement('div'), br=document.createElement('div')
-    tl.className='tl_ico absolute leading-tight'
-    br.className='br_ico absolute leading-tight'
-    tl.style.color=color; br.style.color=color
-    tl.innerHTML=`<b style="font-size:${fs}px">${no}</b><br>${shp}`
-    br.innerHTML=`<b style="font-size:${fs}px">${no}</b><br>${shp}`
+    tl.className=`tl_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
+    br.className=`br_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
+    tl.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
+    br.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
 
     card.append(inner, tl, br)
     return card
@@ -302,7 +363,7 @@ function render(){
         } else {
             const ph=document.createElement('span')
             ph.style.cssText='color:rgba(255,255,255,.2);font-size:1.5rem'
-            ph.textContent='▭'
+            ph.textContent='💃🏻'
             box.append(ph)
         }
     })
@@ -354,8 +415,15 @@ function render(){
         })
     })
 }
-
-document.getElementById('btn-new').addEventListener('click', newGame)
+function toggle_ortho(e){
+    if((e.target).checked){
+        document.querySelector('.viewport').classList.add('ortho')
+    }else{
+        document.querySelector('.viewport').classList.remove('ortho')
+    }
+}
+btn_persp.addEventListener('click', toggle_ortho)
+btn_new.addEventListener('click', newGame)
 btn_undo.addEventListener('click', undo)
 btn_redo.addEventListener('click', redo)
 deal()
