@@ -1,47 +1,37 @@
 <html>
 <head>
-    <title>Baker's - IC_Troo</title>
+    <title>Baker's - ICtroo</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <meta name="description" content="Baker's is IC_Troo way to simplyfy the game using configurable tableau counts.">
+    <meta name="description" content="Baker's is ICtroo way to add variety to the game using configurable tableau counts.">
 </head>
 <style>
     #viewport.ortho{perspective: 100vw; perspective-origin: 50% 50%;}
     #viewport.ortho>#tableau{transform: rotateX(60deg) scale(.96,2.8) translateY(-2%); transform-origin: bottom center;}
     
     .card { cursor:pointer; box-sizing:border-box; background:white; border-radius:.375rem; }
-    .rico { background:white; padding:.2em 0 0 .2em;}
-    
     #foundation .card, #cells .card,#jokes .card{width: 100px;height: 140px;}
     #foundation .pips, #cells .pips{ font-size: 12px !important; flex-shrink: 0;}
     #foundation pre, #cells pre{ font-size: 8px !important; }
-
     
     .sel  { outline:3px solid #60a5fa; outline-offset:-2px; }
     .btn-ctrl { color:white; border-radius:.375rem; background:rgba(255,255,255,.2); border:none; cursor:pointer; }
     .btn-ctrl:hover:not(:disabled) { background:rgba(255,255,255,.3); }
     .btn-ctrl:disabled { opacity:.3; cursor:default; }
+    .rico { background:white; padding:.2em 0 0 .2em;}
 
     .rank-4>span:nth-child(1),.rank-5>span:nth-child(1),
     .rank-6>span:nth-child(1),.rank-7>span:nth-child(1),.rank-8>span:nth-child(1) { grid-area: 1 / 1; } /* r-5 Top Left */
-
     .rank-4>span:nth-child(2),.rank-5>span:nth-child(2),
     .rank-6>span:nth-child(2),.rank-7>span:nth-child(2),.rank-8>span:nth-child(2) { grid-area: 1 / 3; } /* r-5 Top Right */
-
-    .rank-5>span:nth-child(5) { grid-area: 3 / 2; } 
-    
+    .rank-5>span:nth-child(5) { grid-area: 3 / 2; }     
     .rank-6>span:nth-child(3),.rank-7>span:nth-child(3),.rank-8>span:nth-child(3) { grid-area: 3 / 1; } /* r-5 Mid Left */
-
     .rank-6>span:nth-child(4),.rank-7>span:nth-child(4),.rank-8>span:nth-child(4)  { grid-area: 3 / 3; } /* r-5 Mid Right */
-
     .rank-4>span:nth-child(3),.rank-5>span:nth-child(3),
     .rank-6>span:nth-child(5),.rank-7>span:nth-child(5),.rank-8>span:nth-child(5)  { grid-area: 5 / 1; } /* r-5 Bottom Left */
-
     .rank-4>span:nth-child(4),.rank-5>span:nth-child(4), 
     .rank-6>span:nth-child(6),.rank-7>span:nth-child(6),.rank-8>span:nth-child(6) { grid-area: 5 / 3; } /* r-5 Bottom Right */
-
     .rank-8>span:nth-child(7),.rank-7>span:nth-child(7) { grid-area: 2 / 2; }
     .rank-8>span:nth-child(8),.rank-9>span:nth-child(9) { grid-area: 4 / 2; }
-    
     .rank-9>span:nth-child(1),.rank-10>span:nth-child(1) { grid-area: 1 / 1; }
     .rank-9>span:nth-child(2),.rank-10>span:nth-child(2) { grid-area: 3 / 1; }
     .rank-9>span:nth-child(3),.rank-10>span:nth-child(3) { grid-area: 5 / 1; }
@@ -50,7 +40,6 @@
     .rank-9>span:nth-child(6),.rank-10>span:nth-child(6) { grid-area: 3 / 3; }
     .rank-9>span:nth-child(7),.rank-10>span:nth-child(7) { grid-area: 5 / 3; }
     .rank-9>span:nth-child(8),.rank-10>span:nth-child(8) { grid-area: 7 / 3; }
-
     .rank-10>span:nth-child(9) { grid-area: 2 / 2; }
     .rank-10>span:nth-child(10) { grid-area: 6 / 2; }
 </style>
@@ -61,7 +50,7 @@
         <div class="flex flex-col items-center gap-4">
             <div class="flex gap-6 items-center">
                 <button title="Info" class="btn-ctrl text-2xl p-2 pb-3"
-                    onclick="javascript:document.getElementById('game-info').classList.remove('hidden')">ℹ︎</button>
+                    onclick="showInfo()">ℹ︎</button>
                 <button title="Rules" class="btn-ctrl text-2xl p-2 pb-3"
                     onclick="javascript:document.getElementById('game-rule').classList.remove('hidden')">⏣</button>
                 <div class="text-green-600"> <input type="checkbox" name="projection"
@@ -70,7 +59,9 @@
                     : document.getElementById('viewport').classList.remove('ortho'))" /> Perspective </div>
                 <button id="btn-new" title="New Game" class="text-5xl cursor-pointer bg-none">🃏</button>
             </div>
-            <div class="flex gap-4">
+            <div class="flex gap-4 w-full justify-between">
+                <button title="Exit" class="btn-ctrl text-gray-900 text-2xl p-2 pb-3" onclick="javascript:
+                    confirm('Exit Game (back to main page)')?location.href='index.html':'';">✗</button>
                 <button id="btn-undo" class="btn-ctrl text-xs p-2 px-3" disabled>↩ Undo</button>
                 <button id="btn-redo" class="btn-ctrl text-xs p-2 px-3" disabled>Redo ↪</button>
             </div>
@@ -103,16 +94,14 @@
         </div>
     </div>
 </div>
-<div id="game-info" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50" 
+<div id="game-info" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50"
         onclick="javascript:this.classList.add('hidden')">
-    <div class="flex flex-col bg-emerald-600 rounded-xl p-8 shadow-2xl w-6xl" onclick="event.stopPropagation();">
-        <h1 class="text-4xl font-bold">Baker's Game</h1>
-        <div class="mb-6">Rules: <ul>
-            <li></li>
-        </ul> </div>
-        <div class="flex w-full justify-center">
+    <div class="flex flex-col bg-emerald-600 rounded-xl p-8 shadow-2xl w-2xl gap-3" onclick="event.stopPropagation();">
+        <h1 id="info-title" class="text-3xl font-bold"></h1>
+        <div id="info-body" class="flex flex-col gap-2 text-sm leading-relaxed"></div>
+        <div class="flex w-full justify-center mt-2">
             <button class="bg-amber-500 text-white px-6 py-2 rounded-lg text-lg hover:bg-blue-600"
-                onclick="javascript:document.getElementById('game-info').classList.add('hidden')" >Ok</button>
+                onclick="javascript:document.getElementById('game-info').classList.add('hidden')">Ok</button>
         </div>
     </div>
 </div>
@@ -137,8 +126,9 @@
         </div>
         <div class="flex w-full justify-center mt-6">
             <button class="bg-amber-500 text-white px-6 py-2 rounded-lg text-lg hover:bg-blue-600"
-                onclick="javascript:( cellcount=document.getElementById('cell-count').value,
-                    tableaucount=document.getElementById('tableau-count').value,
+                onclick="javascript:( cellcount=+document.getElementById('cell-count').value,
+                    tableaucount=+document.getElementById('tableau-count').value,
+                    mode=document.getElementById('mode').value,
                     document.getElementById('game-rule').classList.add('hidden'),deal() )" >Ok</button>
         </div>
     </div>
@@ -147,6 +137,7 @@
 <script>
 let cellcount    = 4
 let tableaucount = 9
+let mode         = 'baker'
 const card_w = Math.floor((parseInt(window.getComputedStyle(document.body).width) - 45) / tableaucount)
 const card_h = Math.floor(card_w * 1.4)
 const OVERLAP = Math.floor(card_h * 0.28)
@@ -165,6 +156,11 @@ let decks = []
 const sCard_w=100,sCard_h=140
 const SLOT_BASE = `w-[${sCard_w}px] h-[${sCard_h}px] relative rounded border border-green-600 flex items-center justify-center`
 function init(){
+    foundation_box.innerHTML = ''
+    cells_box.innerHTML = ''
+    tableau_box.innerHTML = ''
+    decks = []
+
     for(let x=0; x<4; x++){
         const box=document.createElement('div')
         box.className=SLOT_BASE
@@ -255,6 +251,27 @@ function newGame(){
     deal()
 }
 
+function showInfo(){
+    const isBaker = mode === 'baker'
+    document.getElementById('info-title').textContent = 'How to Play'
+    document.getElementById('info-body').innerHTML = `
+        <p><b>Goal:</b> Move all 52 cards to the 4 foundation piles, built up by suit from Ace to King.</p>
+
+        <p><b>Tableau (${tableaucount} columns):</b> Stack cards in descending rank. The stacking rule depends on the mode:</p>
+        <ul class="list-disc ml-5">
+            <li ${isBaker ? 'class="font-bold underline"' : ''}>Baker's Game — same suit (e.g. 9♠ on 10♠)</li>
+            <li ${!isBaker ? 'class="font-bold underline"' : ''}>Freecell mode — alternating color (e.g. 9♥ on 10♠)</li>
+        </ul>
+        <p class="text-green-200 text-xs">Currently playing: <b>${isBaker ? "Baker's Game" : "Freecell"}</b></p>
+
+        <p><b>Holding slots (${cellcount} slots, top-left):</b> Park any single card here temporarily to free up moves.
+           More empty slots + empty columns = longer sequences you can move at once.</p>
+
+        <p><b>Foundation (top-right):</b> Cards move up automatically once the rank below is already there.</p>
+        <p class="text-green-200 text-xs">Tip: double-click a card to send it to a holding slot instantly.</p>`
+    document.getElementById('game-info').classList.remove('hidden')
+}
+
 // ── Queries ───────────────────────────────────────────────────────────────────
 function freeCells(){ return gCells.filter(c=>c===null).length }
 
@@ -273,6 +290,11 @@ function canGoToFoundation(id){
     return rankIdx(id) === gFoundation[suit(id)].length + 1
 }
 
+function canStack(child, parent){
+    if(mode === 'freecell') return isRed(child) !== isRed(parent) && rankIdx(child) === rankIdx(parent) - 1
+    return suit(child) === suit(parent) && rankIdx(child) === rankIdx(parent) - 1
+}
+
 function canDrop(zone, idx){
     if(!sel) return false
     const moving=selCards(), bot=moving[0]
@@ -281,8 +303,7 @@ function canDrop(zone, idx){
         const col=gTableau[idx], empty=col.length===0
         if(moving.length > maxMovable(empty ? idx : -1)) return false
         if(empty) return true
-        const top=col[col.length-1]
-        return suit(bot)===suit(top) && rankIdx(bot)===rankIdx(top)-1
+        return canStack(bot, col[col.length-1])
     }
     return false
 }
@@ -309,9 +330,46 @@ function checkWin(){
         setTimeout(()=>{
             document.getElementById('play-game').innerHTML=document.getElementById('mode').value=='baker'? "Baker's":"Freecell"
             document.getElementById('play-tableau').innerHTML=document.getElementById('tableau-count').value
-            document.getElementById('play-cells').innerHTML=document.getElementById('cell-count').value            
+            document.getElementById('play-cells').innerHTML=document.getElementById('cell-count').value
             document.getElementById('win-overlay').classList.remove('hidden')
         }, 300)
+}
+
+function hasAnyMove(){
+    const fc = freeCells()
+    for(let i=0; i<cellcount; i++){
+        const c=gCells[i]; if(!c) continue
+        if(canGoToFoundation(c)) return true
+        for(let j=0; j<tableaucount; j++){
+            const col=gTableau[j]
+            if(!col.length || canStack(c, col[col.length-1])) return true
+        }
+    }
+    for(let col=0; col<tableaucount; col++){
+        const c=gTableau[col]; if(!c.length) continue
+        if(canGoToFoundation(c[c.length-1])) return true
+        if(fc > 0) return true  // top card can always go to a free cell
+        for(let from=0; from<c.length; from++){
+            const seq=c.slice(from)
+            let valid=true
+            for(let k=0; k<seq.length-1; k++) if(!canStack(seq[k+1],seq[k])){ valid=false; break }
+            if(!valid) continue
+            const bot=seq[0]
+            for(let dest=0; dest<tableaucount; dest++){
+                if(dest===col) continue
+                const dc=gTableau[dest], empty=dc.length===0
+                if(seq.length > maxMovable(empty ? dest : -1)) continue
+                if(empty || canStack(bot, dc[dc.length-1])) return true
+            }
+        }
+    }
+    return false
+}
+
+function checkLose(){
+    if(shapes.every(s=>gFoundation[s].length===13)) return
+    if(hasAnyMove()) return
+    setTimeout(()=> document.getElementById('lose-overlay').classList.remove('hidden'), 300)
 }
 
 function executeMove(zone, idx){
@@ -325,6 +383,7 @@ function executeMove(zone, idx){
     saveState()
     render()
     checkWin()
+    checkLose()
 }
 
 // ── Click Handlers ────────────────────────────────────────────────────────────
@@ -351,7 +410,7 @@ function handleCardClick(e, col, cardIdx){
     const sub=gTableau[col].slice(cardIdx)
     let valid=true
     for(let k=0; k<sub.length-1; k++)
-        if(suit(sub[k])!==suit(sub[k+1]) || rankIdx(sub[k])!==rankIdx(sub[k+1])+1){ valid=false; break }
+        if(!canStack(sub[k+1], sub[k])){ valid=false; break }
     sel = valid ? {zone:'tableau', col, from:cardIdx} : null
     render()
 }
@@ -369,6 +428,7 @@ function handleCardDblClick(e, col, cardIdx){
     saveState()
     render()
     checkWin()
+    checkLose()
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -460,10 +520,12 @@ function render(){
     })
 
     // Tableau
+    const availH = document.getElementById('viewport').clientHeight || window.innerHeight
     Array.from(tableau_box.children).forEach((box,i)=>{
         box.innerHTML=''
         const col=gTableau[i], n=col.length
-        const totalH=n===0 ? card_h : (n-1)*OVERLAP+card_h
+        const eff = n <= 1 ? OVERLAP : Math.min(OVERLAP, Math.max(4, Math.floor((availH - card_h) / (n - 1))))
+        const totalH=n===0 ? card_h : (n-1)*eff+card_h
         const isTarget=sel && canDrop('tableau',i)
         box.style.height=totalH+'px'
         box.style.borderColor=slotBorder(isTarget)
@@ -478,7 +540,7 @@ function render(){
         col.forEach((cardId,j)=>{
             const isSel=sel?.zone==='tableau' && sel.col===i && j>=sel.from
             const el=makeCardEl(cardId, isSel)
-            el.style.top=`${j*OVERLAP}px`
+            el.style.top=`${j*eff}px`
             el.style.left='0'
             el.style.zIndex=j
             el.onclick=e=>handleCardClick(e,i,j)

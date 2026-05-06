@@ -1,123 +1,17 @@
 <html>
 <head>
-    <title>Cards</title>
+    <title>Play</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <meta name="description" content="Card Design">
+    <meta name="description" content="Casual Games">
 </head>
 <style>
-    .tl_ico { top:.31em; left:.31em; background:white; padding:0 .5em .5em 0;}
-    .br_ico { bottom:.31em; right:.31em; background:white; padding:0 .5em .5em 0; transform:rotate(180deg) }
-    .card { cursor:pointer; box-sizing:border-box; background:white; border-radius:.375rem; }
 
-    .rank-4>span:nth-child(1),.rank-5>span:nth-child(1),
-    .rank-6>span:nth-child(1),.rank-7>span:nth-child(1),.rank-8>span:nth-child(1) { grid-area: 1 / 1; } /* r-5 Top Left */
-
-    .rank-4>span:nth-child(2),.rank-5>span:nth-child(2),
-    .rank-6>span:nth-child(2),.rank-7>span:nth-child(2),.rank-8>span:nth-child(2) { grid-area: 1 / 3; } /* r-5 Top Right */
-
-    .rank-5>span:nth-child(5) { grid-area: 3 / 2; } 
-    
-    .rank-6>span:nth-child(3),.rank-7>span:nth-child(3),.rank-8>span:nth-child(3) { grid-area: 3 / 1; } /* r-5 Mid Left */
-
-    .rank-6>span:nth-child(4),.rank-7>span:nth-child(4),.rank-8>span:nth-child(4)  { grid-area: 3 / 3; } /* r-5 Mid Right */
-
-    .rank-4>span:nth-child(3),.rank-5>span:nth-child(3),
-    .rank-6>span:nth-child(5),.rank-7>span:nth-child(5),.rank-8>span:nth-child(5)  { grid-area: 5 / 1; } /* r-5 Bottom Left */
-
-    .rank-4>span:nth-child(4),.rank-5>span:nth-child(4), 
-    .rank-6>span:nth-child(6),.rank-7>span:nth-child(6),.rank-8>span:nth-child(6) { grid-area: 5 / 3; } /* r-5 Bottom Right */
-
-    .rank-8>span:nth-child(7),.rank-7>span:nth-child(7) { grid-area: 2 / 2; }
-    .rank-8>span:nth-child(8),.rank-9>span:nth-child(9) { grid-area: 4 / 2; }
-    
-    .rank-9>span:nth-child(1),.rank-10>span:nth-child(1) { grid-area: 1 / 1; }
-    .rank-9>span:nth-child(2),.rank-10>span:nth-child(2) { grid-area: 3 / 1; }
-    .rank-9>span:nth-child(3),.rank-10>span:nth-child(3) { grid-area: 5 / 1; }
-    .rank-9>span:nth-child(4),.rank-10>span:nth-child(4) { grid-area: 7 / 1; }
-    .rank-9>span:nth-child(5),.rank-10>span:nth-child(5) { grid-area: 1 / 3; }
-    .rank-9>span:nth-child(6),.rank-10>span:nth-child(6) { grid-area: 3 / 3; }
-    .rank-9>span:nth-child(7),.rank-10>span:nth-child(7) { grid-area: 5 / 3; }
-    .rank-9>span:nth-child(8),.rank-10>span:nth-child(8) { grid-area: 7 / 3; }
-
-    .rank-10>span:nth-child(9) { grid-area: 2 / 2; }
-    .rank-10>span:nth-child(10) { grid-area: 6 / 2; }
 </style>
-<body class="p-0 m-0 select-none" style="height:100vh;background:#166534">
-<div id="foundation" class="flex flex-col gap-1 m-1"></div>
+<body class="flex p-0 m-0 select-none w-full h-full bg-emerald-700 items-center">
+<div class="flex gap-4 m-1 w-full justify-center text-gray-300">
+    <a class='btn bg-amber-600 hover:bg-emerald-600 hover:text-gray-200 rounded p-3 py-1' href="rondeck.html">Tr'ondëk (Klondike)</a>
+    <a class='btn bg-amber-600 hover:bg-emerald-600 hover:text-gray-200 rounded p-3 py-1' href="bakers.html">Baker's Game</a>
+</div>
 <script>
-const card_w = Math.floor((parseInt(window.getComputedStyle(document.body).width) - 45) / 9)
-const card_h = Math.floor(card_w * 1.4)
-const OVERLAP = Math.floor(card_h * 0.28)
-
-const foundation_box = document.getElementById('foundation')
-const seqs   = ['🤹🏻','A','2','3','4','5','6','7','8','9','10','J','Q','K']
-const shapes = ['♠️','♣️','♥️','♦️']
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const suit    = id => id.substring(id.length-2)
-const rank    = id => id.slice(0, id.length-2)
-const rankIdx = id => seqs.indexOf(rank(id))
-const isRed   = id => suit(id)==='♥️' || suit(id)==='♦️'
-
-// ── Render ────────────────────────────────────────────────────────────────────
-function makeCardEl(id){
-    const shp=suit(id), no=rank(id), ri=rankIdx(id)
-    const color =isRed(id)?'text-red-600':'text-gray-900'
-    const border=isRed(id)?'border border-red-300':'border border-gray-300'
-    const fs = Math.floor(card_w*.14)
-
-    const card=document.createElement('div')
-    card.className=`card shadow-md absolute ${border} w-[${card_w}px] h-[${card_h}px] flex items-center justify-center`
-
-    const inner=document.createElement('div')
-    const grid=['🤹🏻','J','Q','K'].indexOf(no)> -1 ? `rounded-xl ${border} grid-cols-1 overflow-hidden` 
-        : ['A','2','3'].indexOf(no)> -1 ? `grid-cols-1` 
-        : (['9','10'].indexOf(no)> -1 ? `rank-${no} grid-cols-3 grid-rows-7 px-5 py-2` : `rank-${no} grid-cols-3 grid-rows-5 px-5 py-2`) 
-        
-    inner.className=`grid ${grid} h-[${Math.floor(card_h*.85)}px] w-[${Math.floor(card_w*.8)}px] items-center justify-center`
-    if(['🤹🏻','J','Q','K'].indexOf(no)> -1){
-        const ima=document.createElement('img')
-        ima.className="object-fill object-center"
-        switch(no){
-            case 'J': ima.src='c_jack.png'; break;
-            case 'Q': ima.src='c_queen.png';break;
-            case 'K': ima.src='c_king.png';break;
-            default: ima.src='c_joker.png'; break;
-        } inner.append(ima)
-    }else{
-        for(let x=0; x<ri; x++){
-            const pip=document.createElement('span')
-            const ts=no=='A' ? Math.floor(card_w*.3) : Math.floor(card_w*.15);
-            pip.className=`flex items-center justify-center text-[${ts}px] ${no=='A'?'text-shadow-lg':''}`
-            pip.textContent=shp
-            inner.append(pip)
-        }
-    }
-    
-    const tl=document.createElement('div'), br=document.createElement('div')
-    tl.className=`tl_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
-    br.className=`br_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
-    tl.innerHTML=no=='🤹🏻'? `<pre class="text-[${fs}px]">J\nO\nK\nE\nR</pre>`:`<b class="text-[${fs}px]">${no}</b><span>${shp}<span>`
-    br.innerHTML=no=='🤹🏻'? `<pre class="text-[${fs}px]">J\nO\nK\nE\nR</pre>`:`<b class="text-[${fs}px]">${no}</b><span>${shp}</span>`
-
-    card.append(inner, tl, br)
-    return card
-}
-
-for(let x=0; x<shapes.length; x++){
-    const box=document.createElement('div')
-    box.className="flex gap-1"
-    
-    for(let y=0; y<seqs.length; y++){
-        const cell=document.createElement('div')
-        cell.className=`flex-none shadow border border-green-700 w-[${card_w+4}px] h-[${card_h+4}px] items-center`
-        
-        // cell.innerHTML=`${seqs[y]} ${shapes[x]}`
-        let card=makeCardEl(`${seqs[y]}${shapes[x]}`)
-        cell.append(card)
-        box.append(cell)
-    } foundation_box.append(box)
-}
-
 </script>
 </html>
