@@ -5,17 +5,19 @@
     <meta name="description" content="Baker's is IC_Troo way to simplyfy the game using configurable tableau counts.">
 </head>
 <style>
-    .viewport.ortho{perspective: 70vw; perspective-origin: 50% 50%;}
-    .viewport.ortho>#tableau{transform: rotateX(60deg) scale(0.4,1.3); transform-origin: top center;}
-    #foundation .card, #cells .card{width: 100px;height: 140px;}
-    #foundation span,
-    #cells span{ font-size: 16px !important;}
-
-    .tl_ico { top:0; left:0; background:white; padding:.3em .3em;}
-    .br_ico { bottom:0; right:0; background:white; padding:.3em .3em; transform:rotate(180deg) }
+    #viewport.ortho{perspective: 100vw; perspective-origin: 50% 50%;}
+    #viewport.ortho>#tableau{transform: rotateX(60deg) scale(.96,2.8) translateY(-2%); transform-origin: bottom center;}
+    
     .card { cursor:pointer; box-sizing:border-box; background:white; border-radius:.375rem; }
+    .rico { background:white; padding:.2em 0 0 .2em;}
+    
+    #foundation .card, #cells .card,#jokes .card{width: 100px;height: 140px;}
+    #foundation .pips, #cells .pips{ font-size: 12px !important; flex-shrink: 0;}
+    #foundation pre, #cells pre{ font-size: 8px !important; }
+
+    
     .sel  { outline:3px solid #60a5fa; outline-offset:-2px; }
-    .btn-ctrl { color:white; font-size:.7rem; padding:.25rem .6rem; border-radius:.375rem; background:rgba(255,255,255,.2); border:none; cursor:pointer; }
+    .btn-ctrl { color:white; border-radius:.375rem; background:rgba(255,255,255,.2); border:none; cursor:pointer; }
     .btn-ctrl:hover:not(:disabled) { background:rgba(255,255,255,.3); }
     .btn-ctrl:disabled { opacity:.3; cursor:default; }
 
@@ -52,36 +54,99 @@
     .rank-10>span:nth-child(9) { grid-area: 2 / 2; }
     .rank-10>span:nth-child(10) { grid-area: 6 / 2; }
 </style>
-<body class="p-0 m-0 select-none h-full overflow-hidden" style="background:#166534">
+<body class="p-0 m-0 select-none h-full overflow-hidden bg-emerald-700">
 <div class="grid grid-rows-[auto_1fr] h-full gap-1 p-2">
-    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">
+    <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
         <div id="cells" class="flex gap-2 justify-start"></div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-            <button id="btn-new" title="New Game" style="font-size:3rem;cursor:pointer;background:none;border:none;padding:0;line-height:1">🃏</button>
-            <div style="display:flex;gap:6px">
-                <button id="btn-undo" class="btn-ctrl" disabled>↩ Undo</button>
-                <button id="btn-redo" class="btn-ctrl" disabled>Redo ↪</button>
+        <div class="flex flex-col items-center gap-4">
+            <div class="flex gap-6 items-center">
+                <button title="Info" class="btn-ctrl text-2xl p-2 pb-3"
+                    onclick="javascript:document.getElementById('game-info').classList.remove('hidden')">ℹ︎</button>
+                <button title="Rules" class="btn-ctrl text-2xl p-2 pb-3"
+                    onclick="javascript:document.getElementById('game-rule').classList.remove('hidden')">⏣</button>
+                <div class="text-green-600"> <input type="checkbox" name="projection"
+                    onclick="javascript:(this.checked 
+                    ? document.getElementById('viewport').classList.add('ortho')
+                    : document.getElementById('viewport').classList.remove('ortho'))" /> Perspective </div>
+                <button id="btn-new" title="New Game" class="text-5xl cursor-pointer bg-none">🃏</button>
             </div>
-            <div class="text-green-600"> <input id="toggle-ortho" type="checkbox" name="projection" /> Perspective </div>
+            <div class="flex gap-4">
+                <button id="btn-undo" class="btn-ctrl text-xs p-2 px-3" disabled>↩ Undo</button>
+                <button id="btn-redo" class="btn-ctrl text-xs p-2 px-3" disabled>Redo ↪</button>
+            </div>
         </div>
         <div id="foundation" class="flex gap-2 justify-end"></div>
     </div>
-    <div class="viewport">
-        <div id="tableau" class="flex gap-1 w-full items-start overflow-auto"></div>
-    </div>
+    <div id="viewport"> <div id="tableau" class="flex gap-1 w-full items-start overflow-auto"></div> </div>
 </div>
 
-<div id="win-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="z-index:50;background:rgba(0,0,0,.6)">
-    <div class="bg-white rounded-xl p-8 text-center shadow-2xl">
-        <div style="font-size:4rem">🎉</div>
-        <div class="text-2xl font-bold mb-6">You Win!</div>
-        <button onclick="newGame()" class="bg-blue-500 text-white px-6 py-3 rounded-lg text-lg hover:bg-blue-600">New Game</button>
+<div id="win-overlay" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50">
+    <div class="bg-emerald-600 rounded-xl p-8 text-center shadow-2xl">
+        <div class="text-2xl font-bold mb-6">Congrats.., You Win!</div>
+        <div style="font-size:4rem">🎉 </div>
+        <p class="mb-4">a <span id="play-game" class="font-bold"></span> Game, 
+           using <span id="play-tableau" class="font-bold"></span> tableau
+           on <span id="play-cells" class="font-bold"></span> cells..</p>
+        <button onclick="newGame()" class="bg-amber-500 text-white px-6 py-3 rounded-lg text-lg hover:bg-amber-600">New Game</button>
+    </div>
+</div>
+<div id="lose-overlay" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50"
+    onclick="javascript:this.classList.add('hidden')">
+    <div class="flex flex-col gap-3 justify-center bg-emerald-600 rounded-xl p-8 text-center shadow-2xl">
+        <div class="text-4xl font-bold">🪦 You Lose 🪦</div>
+        <div id="jokes" class="w-[100px] h-[140px] self-center m-6"></div>
+        <div>
+            <button class="bg-amber-500 text-white px-6 py-1 rounded-lg text-lg hover:bg-amber-600"
+                onclick="javascript:(document.getElementById('lose-overlay').classList.add('hidden'),undo())">↩ Undo</button>
+            <button class="bg-amber-500 text-white px-6 py-1 rounded-lg text-lg hover:bg-amber-600"
+                onclick="newGame()">New Game</button>
+        </div>
+    </div>
+</div>
+<div id="game-info" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50" 
+        onclick="javascript:this.classList.add('hidden')">
+    <div class="flex flex-col bg-emerald-600 rounded-xl p-8 shadow-2xl w-6xl" onclick="event.stopPropagation();">
+        <h1 class="text-4xl font-bold">Baker's Game</h1>
+        <div class="mb-6">Rules: <ul>
+            <li></li>
+        </ul> </div>
+        <div class="flex w-full justify-center">
+            <button class="bg-amber-500 text-white px-6 py-2 rounded-lg text-lg hover:bg-blue-600"
+                onclick="javascript:document.getElementById('game-info').classList.add('hidden')" >Ok</button>
+        </div>
+    </div>
+</div>
+<div id="game-rule" class="hidden fixed inset-0 flex items-center justify-center bg-gray-800/80 z-50" 
+        onclick="javascript:this.classList.add('hidden')">
+    <div class="flex flex-col gap-2 bg-emerald-600 rounded-xl p-8 shadow-2xl w-3xl" onclick="event.stopPropagation();">
+        <h1 class="text-4xl font-bold">Game Config</h1>
+        <div class="flex items-center justify-between">
+            <label for="tableau-count">Tableau Count</label>
+            <input type="number" id="tableau-count" min="7" max="9" value="9"/>
+        </div>
+        <div class="flex items-center justify-between">
+            <label for="cell-count">Cell Count</label>
+            <input type="number" id="cell-count" min="3" max="5" value="4"/>
+        </div>
+        <div class="flex items-center justify-between">
+            <label for="mode">Mode</label>
+            <select name="mode" id="mode">
+                <option value="baker" selected>Baker's (Match Suit)</option>
+                <option value="freecell">Freecell (Stacking color)</option>
+            </select>
+        </div>
+        <div class="flex w-full justify-center mt-6">
+            <button class="bg-amber-500 text-white px-6 py-2 rounded-lg text-lg hover:bg-blue-600"
+                onclick="javascript:( cellcount=document.getElementById('cell-count').value,
+                    tableaucount=document.getElementById('tableau-count').value,
+                    document.getElementById('game-rule').classList.add('hidden'),deal() )" >Ok</button>
+        </div>
     </div>
 </div>
 
 <script>
-const cellcount    = 4
-const tableaucount = 9
+let cellcount    = 4
+let tableaucount = 9
 const card_w = Math.floor((parseInt(window.getComputedStyle(document.body).width) - 45) / tableaucount)
 const card_h = Math.floor(card_w * 1.4)
 const OVERLAP = Math.floor(card_h * 0.28)
@@ -89,38 +154,39 @@ const OVERLAP = Math.floor(card_h * 0.28)
 const tableau_box    = document.getElementById('tableau')
 const cells_box      = document.getElementById('cells')
 const foundation_box = document.getElementById('foundation')
-const btn_new      = document.getElementById('btn-new')
+const btn_new        = document.getElementById('btn-new')
 const btn_undo       = document.getElementById('btn-undo')
 const btn_redo       = document.getElementById('btn-redo')
-const btn_persp      = document.getElementById('toggle-ortho')
-
-const sCard_w=100,sCard_h=140
-const SLOT_BASE = `w-[${sCard_w}px] h-[${sCard_h}px] relative rounded border border-green-600 flex items-center justify-center`
-
-for(let x=0; x<4; x++){
-    const box=document.createElement('div')
-    box.className=SLOT_BASE
-    box.style.cssText=`flex-shrink:0;`
-    foundation_box.append(box)
-}
-for(let x=0; x<cellcount; x++){
-    const box=document.createElement('div')
-    box.className=SLOT_BASE
-    box.style.cssText=`flex-shrink:0;`
-    cells_box.append(box)
-}
-for(let x=0; x<tableaucount; x++){
-    const box=document.createElement('div')
-    box.className=`flex-1 relative rounded border border-green-600 min-h-[${card_h}px]`
-    tableau_box.append(box)
-}
 
 const seqs   = ['🤹🏻','A','2','3','4','5','6','7','8','9','10','J','Q','K']
 const shapes = ['♠️','♣️','♥️','♦️']
 let decks = []
-for(let x=0; x<shapes.length; x++)
-    for(let y=1; y<seqs.length; y++)
-        decks.push(seqs[y]+shapes[x])
+
+const sCard_w=100,sCard_h=140
+const SLOT_BASE = `w-[${sCard_w}px] h-[${sCard_h}px] relative rounded border border-green-600 flex items-center justify-center`
+function init(){
+    for(let x=0; x<4; x++){
+        const box=document.createElement('div')
+        box.className=SLOT_BASE
+        box.style.cssText=`flex-shrink:0;`
+        foundation_box.append(box)
+    }
+    for(let x=0; x<cellcount; x++){
+        const box=document.createElement('div')
+        box.className=SLOT_BASE
+        box.style.cssText=`flex-shrink:0;`
+        cells_box.append(box)
+    }
+    for(let x=0; x<tableaucount; x++){
+        const box=document.createElement('div')
+        box.className=`flex-1 relative rounded border border-green-600 min-h-[${card_h}px]`
+        tableau_box.append(box)
+    }
+
+    for(let x=0; x<shapes.length; x++)
+        for(let y=1; y<seqs.length; y++)
+            decks.push(seqs[y]+shapes[x])
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const suit    = id => id.substring(id.length-2)
@@ -173,6 +239,7 @@ function shuffle(arr){
 }
 
 function deal(){
+    init()
     gCells      = Array(cellcount).fill(null)
     gFoundation = {'♠️':[],'♣️':[],'♥️':[],'♦️':[]}
     gTableau    = Array(tableaucount).fill(null).map(()=>[])
@@ -239,7 +306,12 @@ function autoFoundation(){
 
 function checkWin(){
     if(shapes.every(s=>gFoundation[s].length===13))
-        setTimeout(()=>document.getElementById('win-overlay').classList.remove('hidden'), 300)
+        setTimeout(()=>{
+            document.getElementById('play-game').innerHTML=document.getElementById('mode').value=='baker'? "Baker's":"Freecell"
+            document.getElementById('play-tableau').innerHTML=document.getElementById('tableau-count').value
+            document.getElementById('play-cells').innerHTML=document.getElementById('cell-count').value            
+            document.getElementById('win-overlay').classList.remove('hidden')
+        }, 300)
 }
 
 function executeMove(zone, idx){
@@ -312,9 +384,9 @@ function makeCardEl(id, selected){
     const inner=document.createElement('div')
     const grid=['🤹🏻','J','Q','K'].indexOf(no)> -1 ? `rounded-xl ${border} grid-cols-1 overflow-hidden` 
         : ['A','2','3'].indexOf(no)> -1 ? `grid-cols-1` 
-        : (['9','10'].indexOf(no)> -1 ? `rank-${no} grid-cols-3 grid-rows-7 px-5 py-2` : `rank-${no} grid-cols-3 grid-rows-5 px-5 py-2`) 
+        : (['9','10'].indexOf(no)> -1 ? `rank-${no} grid-cols-3 grid-rows-7 px-[10px] py-[5px]` : `rank-${no} grid-cols-3 grid-rows-5 px-[10px] py-[5px]`) 
         
-    inner.className=`grid ${grid} h-[${Math.floor(card_h*.85)}px] w-[${Math.floor(card_w*.8)}px] items-center justify-center`
+    inner.className=`grid ${grid} h-9/10 w-8/10 items-center justify-center`
     if(['🤹🏻','J','Q','K'].indexOf(no)> -1){
         const ima=document.createElement('img')
         ima.className="object-cover object-center"
@@ -328,15 +400,15 @@ function makeCardEl(id, selected){
         for(let x=0; x<ri; x++){
             const pip=document.createElement('span')
             const ts=no=='A' ? Math.floor(card_w*.3) : Math.floor(card_w*.15);
-            pip.className=`flex items-center justify-center text-[${ts}px] ${no=='A'?'text-shadow-lg':''}`
+            pip.className=`pips flex items-center justify-center text-[${ts}px] ${no=='A'?'text-shadow-lg':''}`
             pip.textContent=shp
             inner.append(pip)
         }
     }
     
     const tl=document.createElement('div'), br=document.createElement('div')
-    tl.className=`tl_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
-    br.className=`br_ico absolute leading-tight flex flex-col items-center justify-center ${color}`
+    tl.className=`rico top-0 left-0 absolute leading-tight flex flex-col items-center justify-center ${color}`
+    br.className=`rico right-0 bottom-0 rotate-[180deg] absolute leading-tight flex flex-col items-center justify-center ${color}`
     tl.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
     br.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
 
@@ -415,14 +487,7 @@ function render(){
         })
     })
 }
-function toggle_ortho(e){
-    if((e.target).checked){
-        document.querySelector('.viewport').classList.add('ortho')
-    }else{
-        document.querySelector('.viewport').classList.remove('ortho')
-    }
-}
-btn_persp.addEventListener('click', toggle_ortho)
+document.getElementById('jokes').prepend(makeCardEl('🤹🏻♦️'))
 btn_new.addEventListener('click', newGame)
 btn_undo.addEventListener('click', undo)
 btn_redo.addEventListener('click', redo)
