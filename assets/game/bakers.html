@@ -449,11 +449,11 @@ function makeCardEl(id, selected){
     inner.className=`grid ${grid} h-9/10 w-8/10 items-center justify-center`
     if(['🤹🏻','J','Q','K'].indexOf(no)> -1){
         const ima=document.createElement('img')
-        ima.className="object-cover object-center"
+        ima.className="object-cover object-center w-full h-full"
         switch(no){
-            case 'J': ima.src='c_jack.png'; break;
-            case 'Q': ima.src='c_queen.png';break;
-            case 'K': ima.src='c_king.png';break;
+            case 'J': ima.src='c_jack.svg'; break;
+            case 'Q': ima.src='c_queen.svg';break;
+            case 'K': ima.src='c_king.svg';break;
             default: ima.src='c_joker.png'; break;
         } inner.append(ima)
     }else{

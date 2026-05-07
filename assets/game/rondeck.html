@@ -514,9 +514,9 @@ function makeCardFace(id, selected){
         const ima=document.createElement('img')
         ima.className="object-cover object-center w-full h-full"
         switch(no){
-            case 'J': ima.src='c_jack.png'; break;
-            case 'Q': ima.src='c_queen.png';break;
-            case 'K': ima.src='c_king.svg';break;
+            case 'J': ima.src='c_jack.svg'; break;
+            case 'Q': ima.src='c_queen.svg';break;
+            case 'K': ima.src='c_king.png';break;
             default: ima.src='c_joker.png'; break;
         } inner.append(ima)
     }else{
