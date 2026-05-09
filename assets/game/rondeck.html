@@ -1,5 +1,6 @@
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Tr'ondëk - ICtroo</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <meta name="description" content="Tr'ondëk is ICtroo way to add variety to the klondike game to kill times.">
@@ -10,6 +11,8 @@
     
     .card-face { cursor:pointer; box-sizing:border-box; background:white; border-radius:.375rem; }
     .card-back { box-sizing:border-box; border-radius:.375rem; background:#1e40af; border:1px solid #1e3a8a; }
+    .red .cloth{fill:#F66 !important;}
+    .gray .cloth{fill:#6F6 !important;}
     #deck .card-back,
     #deal .card-face, #deal .card-back, 
     #foundation .card-face, #foundation .card-back,#jokes .card-face{width: 100px; height: 139px !important;}
@@ -156,6 +159,32 @@ let emptyColRule = 'king'
 
 const seqs   = ['🤹🏻','A','2','3','4','5','6','7','8','9','10','J','Q','K']
 const shapes = ['♠️','♣️','♥️','♦️']
+
+const svgCache = {}
+const svgUrls  = {}
+async function loadSVGs(){
+    const urls = {
+        'c_jack' :'https://res.cloudinary.com/dq8jqjhhz/image/upload/v1778292054/c_jack_ty4qv1.svg',
+        'c_queen':'https://res.cloudinary.com/dq8jqjhhz/image/upload/v1778292055/c_queen_ek7qcd.svg',
+        'c_king' :'https://res.cloudinary.com/dq8jqjhhz/image/upload/v1778292054/c_king_v5y0oi.svg',
+        'c_joker':'https://res.cloudinary.com/dq8jqjhhz/image/upload/v1778292055/c_joker_vpvoxm.svg'
+    }
+    await Promise.all(Object.entries(urls).map(async ([key, url]) => {
+        svgCache[key] = await (await fetch(url)).text()
+    }))
+    const colors = {red:'#F66', gray:'#6F6'}
+    Object.entries(svgCache).forEach(([key, svg]) => {
+        Object.entries(colors).forEach(([colorName, color]) => {
+            const doc = new DOMParser().parseFromString(svg, 'image/svg+xml')
+            doc.querySelectorAll('.cloth').forEach(el => {
+                const s = el.getAttribute('style') || ''
+                if(s.includes('fill:')) el.setAttribute('style', s.replace(/fill:[^;}"]+/, 'fill:'+color))
+                else el.setAttribute('fill', color)
+            })
+            svgUrls[key+':'+colorName] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(doc))
+        })
+    })
+}
 
 const suit    = id => id.substring(id.length-2)
 const rank    = id => id.slice(0, id.length-2)
@@ -498,6 +527,7 @@ function handleCardDblClick(e, col, cardIdx){
 function makeCardFace(id, selected){
     const shp=suit(id), no=rank(id), ri=rankIdx(id)
     const color =isRed(id)?'text-red-600':'text-gray-900'
+    const bg =isRed(id)?'red':'gray'
     const border=isRed(id)?'border border-red-300':'border border-gray-300'
     const fs = Math.floor(card_w*.14)
 
@@ -511,14 +541,11 @@ function makeCardFace(id, selected){
         
     inner.className=`grid ${grid} h-9/10 w-8/10 items-center justify-center`
     if(['🤹🏻','J','Q','K'].indexOf(no)> -1){
-        const ima=document.createElement('img')
-        ima.className="object-cover object-center w-full h-full"
-        switch(no){
-            case 'J': ima.src='c_jack.svg'; break;
-            case 'Q': ima.src='c_queen.svg';break;
-            case 'K': ima.src='c_king.png';break;
-            default: ima.src='c_joker.png'; break;
-        } inner.append(ima)
+        const svgKey = no==='J'?'c_jack': no==='Q'?'c_queen': no==='K'?'c_king':'c_joker'
+        const ima = document.createElement('img')
+        ima.className = 'object-cover object-center w-full h-full'
+        ima.src = svgUrls[svgKey+':'+bg] || ''
+        inner.append(ima)
     }else{
         for(let x=0; x<ri; x++){
             const pip=document.createElement('span')
@@ -535,6 +562,7 @@ function makeCardFace(id, selected){
     tl.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
     br.innerHTML=`<pre class="text-center text-md">${no=='🤹🏻'? 'J\nO\nK\nE\nR': no+"\n"+shp }</pre>`
 
+    card.dataset.cardId = id
     card.append(inner,tl,br)
     return card
 }
@@ -552,7 +580,29 @@ function makeCardBack(){
 function slotBorder(t){ return t?'#4ade80':'rgba(255,255,255,.3)' }
 function slotBorderW(t){ return t?'2px':'1px' }
 
+function flipAnimate(prevRects){
+    document.querySelectorAll('[data-card-id]').forEach(el => {
+        const prev = prevRects[el.dataset.cardId]
+        if(!prev) return
+        const curr = el.getBoundingClientRect()
+        const dx = prev.left - curr.left, dy = prev.top - curr.top
+        if(Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+        el.style.transition = 'none'
+        el.style.transform = `translate(${dx}px,${dy}px)`
+        el.style.zIndex = '1000'
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            el.style.transition = 'transform 0.2s ease-out'
+            el.style.transform = ''
+            el.addEventListener('transitionend', () => { el.style.zIndex = '' }, {once:true})
+        }))
+    })
+}
+
 function render(){
+    const prevRects = {}
+    document.querySelectorAll('[data-card-id]').forEach(el => {
+        prevRects[el.dataset.cardId] = el.getBoundingClientRect()
+    })
     // Deck (stock)
     deck_box.innerHTML=''
     deck_box.onclick=handleDeckClick
@@ -642,6 +692,7 @@ function render(){
             topY += faceDown ? effDown : (j===n-1 ? 0 : effUp)
         })
     })
+    flipAnimate(prevRects)
 }
 function toggle_ortho(e){
     if((e.target).checked){
@@ -654,8 +705,10 @@ btn_new.addEventListener('click', newGame)
 btn_persp.addEventListener('click', toggle_ortho)
 btn_undo.addEventListener('click', undo)
 btn_redo.addEventListener('click', redo)
-deal()
-document.getElementById('jokes').prepend(makeCardFace('🤹🏻♦️'))
+loadSVGs().then(() => {
+    deal()
+    document.getElementById('jokes').prepend(makeCardFace('🤹🏻♦️'))
+})
 
 </script>
 </html>
