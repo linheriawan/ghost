@@ -4,37 +4,61 @@
 //! Capture:  cpal default input device at 16 kHz mono for STT pipeline.
 
 // ---------------------------------------------------------------------------
-// Playback
+// Playback — persistent sink (no click between segments)
 // ---------------------------------------------------------------------------
+//
+// Each call to play_samples_async() previously created a new OutputStream,
+// which caused an audible click/pop as the OS audio device was released and
+// re-acquired.  PlaybackSink keeps one OutputStream open for the lifetime of
+// the brain and queues samples onto a single Sink — transitions are seamless.
 
-/// Play 32-bit float PCM samples on the default audio output.
-///
-/// Spawns a detached thread so it does not block the caller.
-pub fn play_samples_async(samples: Vec<f32>, sample_rate: u32) {
-    std::thread::Builder::new()
-        .name("tts-playback".into())
-        .spawn(move || match play_samples_blocking(&samples, sample_rate) {
-            Ok(()) => log::info!("audio: playback finished"),
-            Err(e) => log::error!("audio: playback error: {e}"),
-        })
-        .expect("failed to spawn playback thread");
+/// A long-lived audio output context.  Create once; call `play()` many times.
+pub struct PlaybackSink {
+    tx: std::sync::mpsc::Sender<(Vec<f32>, u32)>,
 }
 
-/// Play samples synchronously — blocks until audio completes.
-pub fn play_samples_blocking(samples: &[f32], sample_rate: u32) -> anyhow::Result<()> {
-    use rodio::buffer::SamplesBuffer;
-    use rodio::{OutputStream, Sink};
+impl PlaybackSink {
+    /// Spawn the background playback thread and return a handle.
+    pub fn new() -> anyhow::Result<Self> {
+        use rodio::buffer::SamplesBuffer;
+        use rodio::{OutputStream, Sink};
 
-    let (_stream, handle) =
-        OutputStream::try_default().map_err(|e| anyhow::anyhow!("audio output: {e}"))?;
-    let sink = Sink::try_new(&handle).map_err(|e| anyhow::anyhow!("audio sink: {e}"))?;
+        // Channel for (samples, sample_rate) pairs.
+        let (tx, rx) = std::sync::mpsc::channel::<(Vec<f32>, u32)>();
 
-    // channels: 1 (mono), sample_rate, data
-    let source = SamplesBuffer::new(1u16, sample_rate, samples.to_vec());
-    sink.append(source);
-    sink.sleep_until_end();
+        std::thread::Builder::new()
+            .name("tts-playback".into())
+            .spawn(move || {
+                // OutputStream must live for the entire thread — dropping it
+                // closes the device and causes the click we are trying to avoid.
+                let (_stream, handle) = match OutputStream::try_default() {
+                    Ok(v) => v,
+                    Err(e) => { log::error!("audio: output device: {e}"); return; }
+                };
+                let sink = match Sink::try_new(&handle) {
+                    Ok(s) => s,
+                    Err(e) => { log::error!("audio: sink: {e}"); return; }
+                };
 
-    Ok(())
+                while let Ok((samples, sample_rate)) = rx.recv() {
+                    // Append to the already-open sink — no device open/close, no click.
+                    sink.append(SamplesBuffer::new(1u16, sample_rate, samples));
+                    log::info!("audio: queued {} samples at {}Hz", sink.len(), sample_rate);
+                }
+
+                log::info!("audio: playback thread exiting");
+            })
+            .expect("failed to spawn tts-playback thread");
+
+        Ok(Self { tx })
+    }
+
+    /// Queue samples for playback (non-blocking).  Returns estimated duration.
+    pub fn play(&self, samples: Vec<f32>, sample_rate: u32) -> std::time::Duration {
+        let secs = samples.len() as f64 / sample_rate as f64;
+        let _ = self.tx.send((samples, sample_rate));
+        std::time::Duration::from_secs_f64(secs)
+    }
 }
 
 // ---------------------------------------------------------------------------

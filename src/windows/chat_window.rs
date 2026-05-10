@@ -142,8 +142,10 @@ pub struct ChatWindow {
     waiting_for_brain: bool,
     /// Whether voice mode is active (mic → STT → LLM → TTS).
     voice_mode: bool,
-    /// Voice status string shown in UI when in voice mode.
+    /// Voice status label (stripped of the `##....` level bar portion).
     voice_status: String,
+    /// Audio input level 0.0–1.0, derived from the `#` count in VoiceStatus.
+    audio_level: f32,
 }
 
 impl ChatWindow {
@@ -263,7 +265,8 @@ impl ChatWindow {
             brain_rx,
             waiting_for_brain: false,
             voice_mode: false,
-            voice_status: "Listening...".to_string(),
+            voice_status: String::new(),
+            audio_level: 0.0,
         }
     }
 
@@ -359,10 +362,15 @@ impl ChatWindow {
                                     .map(|m| m.role == "assistant")
                                     .unwrap_or(false);
                                 if !last_is_assistant {
-                                    self.messages.push(ChatMessage {
-                                        role: "assistant".to_string(),
-                                        content: token,
-                                    });
+                                    // Strip leading newlines — the model echoes the
+                                    // newline from `<|im_start|>assistant\n` as first token.
+                                    let trimmed = token.trim_start_matches('\n').to_string();
+                                    if !trimmed.is_empty() {
+                                        self.messages.push(ChatMessage {
+                                            role: "assistant".to_string(),
+                                            content: trimmed,
+                                        });
+                                    }
                                 } else if let Some(last) = self.messages.last_mut() {
                                     last.content.push_str(&token);
                                 }
@@ -372,7 +380,8 @@ impl ChatWindow {
                         BrainResponse::ChatDone => {
                             self.waiting_for_brain = false;
                             if self.voice_mode {
-                                self.voice_status = "Listening...".to_string();
+                                self.voice_status = "Listening".to_string();
+                                self.audio_level = 0.0;
                             }
                             self.needs_repaint = true;
                         }
@@ -384,30 +393,43 @@ impl ChatWindow {
                             self.waiting_for_brain = false;
                             self.needs_repaint = true;
                         }
-                        BrainResponse::SpeechReady { samples, sample_rate } => {
-                            // Play TTS audio in a background thread so UI doesn't block.
-                            crate::brain::audio::play_samples_async(samples, sample_rate);
+                        // SpeechReady removed — brain plays audio directly via PlaybackSink.
+                        BrainResponse::InputDraft { text } => {
+                            // Voice pipeline is writing to the input box in real time.
+                            self.input_text = text;
+                            self.needs_repaint = true;
                         }
                         BrainResponse::Transcription { text } => {
-                            // STT result in voice mode — auto-submit as user message.
-                            self.messages.push(ChatMessage {
-                                role: "user".to_string(),
-                                content: text.clone(),
-                            });
-                            self.voice_status = "Thinking...".to_string();
-                            if let Some(ref tx) = self.brain_tx {
-                                let _ = tx.send(BrainCommand::Chat { message: text });
-                                self.waiting_for_brain = true;
+                            // Final corrected transcription — set input box then auto-send.
+                            self.input_text = text.clone();
+                            let msg = text.trim().to_string();
+                            if !msg.is_empty() {
+                                self.messages.push(ChatMessage {
+                                    role: "user".to_string(),
+                                    content: msg.clone(),
+                                });
+                                self.voice_status = "Thinking...".to_string();
+                                self.audio_level = 0.0;
+                                if let Some(ref tx) = self.brain_tx {
+                                    let _ = tx.send(BrainCommand::Chat { message: msg });
+                                    self.waiting_for_brain = true;
+                                }
+                                self.input_text.clear();
                             }
                             self.needs_repaint = true;
                         }
                         BrainResponse::VoiceModeChanged(on) => {
                             self.voice_mode = on;
-                            self.voice_status = if on { "Listening  ░░░░░░░░░░".to_string() } else { String::new() };
+                            self.voice_status = if on { "Listening".to_string() } else { String::new() };
+                            self.audio_level = 0.0;
                             self.needs_repaint = true;
                         }
                         BrainResponse::VoiceStatus(status) => {
-                            self.voice_status = status;
+                            let (label, level) = parse_voice_status(&status);
+                            self.voice_status = label.to_string();
+                            if level > 0.0 {
+                                self.audio_level = level;
+                            }
                             self.needs_repaint = true;
                         }
                     },
@@ -700,6 +722,7 @@ impl ChatWindow {
         let assistant_name = self.assistant_name.clone();
         let voice_mode = self.voice_mode;
         let voice_status = self.voice_status.clone();
+        let audio_level = self.audio_level;
 
         // Extract theme values for use inside the closure
         let theme = &self.theme;
@@ -738,114 +761,148 @@ impl ChatWindow {
             style.visuals.widgets.active.bg_fill = widget_active_bg;
             ctx.set_style(style);
 
-            // Bottom panel: input area
+            // Bottom panel: input row + status bar
             egui::TopBottomPanel::bottom("input_panel")
                 .resizable(false)
-                .min_height(56.0)
                 .frame(egui::Frame::none()
                     .fill(input_panel_bg)
                     .inner_margin(input_panel_margin))
                 .show(ctx, |ui| {
                     ui.vertical(|ui| {
-                        // Voice status bar (shown only in voice mode)
-                        if voice_mode {
-                            ui.horizontal(|ui| {
-                                let status_color = if waiting_for_brain {
-                                    egui::Color32::from_rgb(250, 200, 60)
-                                } else {
-                                    egui::Color32::from_rgb(60, 220, 120)
-                                };
-                                ui.label(
-                                    egui::RichText::new(&voice_status)
-                                        .color(status_color)
-                                        .size(12.0)
-                                        .italics()
-                                );
+                        // ── Row 1: input text with embedded send button (always visible) ──
+                        {
+                            let input_frame = egui::Frame::none()
+                                .fill(widget_inactive_bg)
+                                .rounding(egui::Rounding::same(8.0))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 70, 90)))
+                                .inner_margin(egui::Margin::symmetric(8.0, 4.0));
+
+                            let mut send_action = false;
+                            input_frame.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let btn_w = 28.0;
+                                    let gap = 6.0;
+                                    let te_width = ui.available_width() - btn_w - gap;
+
+                                    // Hint changes based on mode so the user knows what's happening
+                                    let hint = if voice_mode {
+                                        "Listening for voice..."
+                                    } else {
+                                        &input_hint
+                                    };
+
+                                    let te = egui::TextEdit::singleline(&mut input_text)
+                                        .frame(false)
+                                        .hint_text(hint)
+                                        .desired_width(te_width)
+                                        .text_color(input_text_color);
+
+                                    let te_resp = ui.add(te);
+                                    let enter = te_resp.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                                    ui.add_space(gap);
+                                    let send_btn = egui::Button::new(
+                                        egui::RichText::new("►")
+                                            .color(send_btn_text_color)
+                                            .size(13.0),
+                                    )
+                                    .fill(send_btn_color)
+                                    .rounding(6.0)
+                                    .min_size(egui::vec2(btn_w, 22.0));
+
+                                    send_action = (ui.add(send_btn).clicked() || enter)
+                                        && !input_text.trim().is_empty()
+                                        && !waiting_for_brain;
+                                });
                             });
-                            ui.add_space(4.0);
+
+                            if send_action {
+                                let user_msg = input_text.trim().to_string();
+                                new_messages.push(ChatMessage {
+                                    role: "user".to_string(),
+                                    content: user_msg.clone(),
+                                });
+                                if let Some(ref sender) = on_send {
+                                    let _ = sender.send(user_msg.clone());
+                                }
+                                if let Some(ref tx) = brain_tx {
+                                    let _ = tx.send(BrainCommand::Chat { message: user_msg });
+                                } else {
+                                    new_messages.push(ChatMessage {
+                                        role: "assistant".to_string(),
+                                        content: format!(
+                                            "You said: \"{}\" (No brain configured)",
+                                            user_msg
+                                        ),
+                                    });
+                                }
+                                input_text.clear();
+                            }
                         }
 
+                        ui.add_space(5.0);
+
+                        // ── Row 2: status | Mode dropdown | Mic level ──────────
                         ui.horizontal(|ui| {
-                            let available = ui.available_width();
-                            // Reserve space: voice toggle (44px) + send (44px) + gaps
-                            let reserved = if voice_mode { 54.0 } else { 98.0 };
+                            let dim = egui::Color32::from_rgb(110, 110, 130);
 
-                            if !voice_mode {
-                                // Text input (hidden in voice mode — mic is the input)
-                                let text_edit = egui::TextEdit::singleline(&mut input_text)
-                                    .hint_text(&input_hint)
-                                    .desired_width(available - reserved)
-                                    .text_color(input_text_color)
-                                    .frame(true);
-
-                                let response = ui.add(text_edit);
-
-                                let enter_pressed = response.lost_focus()
-                                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                                // Send button
-                                let send_btn = egui::Button::new(
-                                    egui::RichText::new(">").color(send_btn_text_color).strong().size(16.0)
-                                )
-                                .fill(send_btn_color)
-                                .rounding(send_btn_rounding)
-                                .min_size(send_btn_size);
-
-                                let send_clicked = ui.add(send_btn).clicked();
-
-                                if (enter_pressed || send_clicked)
-                                    && !input_text.trim().is_empty()
-                                    && !waiting_for_brain
-                                {
-                                    let user_msg = input_text.trim().to_string();
-
-                                    new_messages.push(ChatMessage {
-                                        role: "user".to_string(),
-                                        content: user_msg.clone(),
-                                    });
-
-                                    if let Some(ref sender) = on_send {
-                                        let _ = sender.send(user_msg.clone());
-                                    }
-
-                                    if let Some(ref tx) = brain_tx {
-                                        let _ = tx.send(BrainCommand::Chat { message: user_msg });
-                                    } else {
-                                        new_messages.push(ChatMessage {
-                                            role: "assistant".to_string(),
-                                            content: format!(
-                                                "You said: \"{}\" (No brain configured)",
-                                                user_msg
-                                            ),
-                                        });
-                                    }
-
-                                    input_text.clear();
-                                }
-                            } else {
-                                // In voice mode: expand status space, no text input
-                                ui.add_space(available - reserved);
-                            }
-
-                            // Voice toggle button  [Text] / [Mic]
-                            let (toggle_label, toggle_color) = if voice_mode {
-                                ("Mic", egui::Color32::from_rgb(220, 60, 60))
-                            } else {
-                                ("Text", egui::Color32::from_rgb(80, 80, 100))
+                            // Status text (left) — colour-coded by pipeline phase
+                            let status_str = if voice_status.is_empty() { "Ready" } else { &voice_status };
+                            let status_color = match voice_status.as_str() {
+                                s if s.starts_with("Hearing") => egui::Color32::from_rgb(60, 210, 110),
+                                s if s.starts_with("Transcrib") || s.starts_with("Correct") => egui::Color32::from_rgb(250, 190, 50),
+                                s if s.starts_with("Thinking") => egui::Color32::from_rgb(120, 170, 255),
+                                s if s.contains("error") || s.contains("Error") => egui::Color32::from_rgb(220, 80, 80),
+                                _ => dim,
                             };
-                            let voice_btn = egui::Button::new(
-                                egui::RichText::new(toggle_label).size(12.0).strong()
-                            )
-                            .fill(toggle_color)
-                            .rounding(send_btn_rounding)
-                            .min_size(egui::vec2(44.0, 32.0));
+                            ui.label(
+                                egui::RichText::new(status_str)
+                                    .color(status_color)
+                                    .size(11.0)
+                                    .italics(),
+                            );
 
-                            if ui.add(voice_btn).clicked() {
-                                if let Some(ref tx) = brain_tx {
-                                    let _ = tx.send(BrainCommand::SetVoiceMode(!voice_mode));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                // Mic level bar (rightmost, only in voice mode)
+                                if voice_mode {
+                                    let bar_color = if audio_level > 0.3 {
+                                        egui::Color32::from_rgb(60, 200, 100)
+                                    } else {
+                                        egui::Color32::from_rgb(60, 120, 70)
+                                    };
+                                    ui.add(
+                                        egui::ProgressBar::new(audio_level)
+                                            .desired_width(70.0)
+                                            .fill(bar_color),
+                                    );
+                                    ui.label(egui::RichText::new("Mic").color(dim).size(11.0));
+                                    ui.separator();
                                 }
-                                new_voice_mode = Some(!voice_mode);
-                            }
+
+                                // Mode dropdown
+                                let mode_label = if voice_mode { "Voice" } else { "Text" };
+                                egui::ComboBox::from_id_source("mode_combo")
+                                    .selected_text(egui::RichText::new(mode_label).size(11.0))
+                                    .width(60.0)
+                                    .show_ui(ui, |ui| {
+                                        let text_sel = ui.selectable_label(!voice_mode, "Text");
+                                        let voice_sel = ui.selectable_label(voice_mode, "Voice");
+                                        if text_sel.clicked() && voice_mode {
+                                            if let Some(ref tx) = brain_tx {
+                                                let _ = tx.send(BrainCommand::SetVoiceMode(false));
+                                            }
+                                            new_voice_mode = Some(false);
+                                        }
+                                        if voice_sel.clicked() && !voice_mode {
+                                            if let Some(ref tx) = brain_tx {
+                                                let _ = tx.send(BrainCommand::SetVoiceMode(true));
+                                            }
+                                            new_voice_mode = Some(true);
+                                        }
+                                    });
+                                ui.label(egui::RichText::new("Mode").color(dim).size(11.0));
+                            });
                         });
                     });
                 });
@@ -974,7 +1031,8 @@ impl ChatWindow {
         self.input_text = input_text;
         if let Some(vm) = new_voice_mode {
             self.voice_mode = vm;
-            self.voice_status = if vm { "Listening...".to_string() } else { String::new() };
+            self.voice_status = if vm { "Listening".to_string() } else { String::new() };
+            self.audio_level = 0.0;
         }
 
         // Handle repaint requests - check if there are pending animations
@@ -1040,6 +1098,20 @@ impl ChatWindow {
         }
     }
 
+}
+
+/// Split "Hearing you  ##........" into ("Hearing you", 0.2).
+/// The double-space separator is what the brain uses between label and bar.
+fn parse_voice_status(s: &str) -> (&str, f32) {
+    if let Some(idx) = s.find("  ") {
+        let label = s[..idx].trim();
+        let bar = &s[idx + 2..];
+        let hash_count = bar.chars().filter(|&c| c == '#').count();
+        let level = (hash_count as f32 / 10.0).clamp(0.0, 1.0);
+        (label, level)
+    } else {
+        (s.trim(), 0.0)
+    }
 }
 
 /// Implement ExtraWindow trait for integration with ghost-ui event loop

@@ -107,9 +107,9 @@ tts_voice     = "models/tts/kokoro/af_bella.bin"
 tts_tokenizer = "models/tts/kokoro/tokenizer.json"
 tts_lang      = "a"   # "a"=en-us, "b"=en-gb, "id"=Bahasa Indonesia, etc.
 
-# Whisper ONNX STT (onnx-community/whisper-base.en)
-stt_encoder = "models/stt/whisper/encoder_model.onnx"
-stt_decoder = "models/stt/whisper/decoder_model_merged.onnx"
+# Whisper ONNX STT (onnx-community/whisper-base — multilingual, auto language detection)
+stt_encoder = "models/stt/whisper-multi/encoder_model.onnx"
+stt_decoder = "models/stt/whisper-multi/decoder_model_merged.onnx"
 
 # Layer overlays - images rendered on top of the main skin
 [[layers]]

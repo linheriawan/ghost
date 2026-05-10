@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
-use ndarray::{Array1, Array2, Array3, Array4, Axis, Ix3, Ix4};
+use ndarray::{Array1, Array2, Array3, Array4, Axis, Ix3};
 use ort::session::Session;
 use ort::value::{DynValue, Tensor};
 use rustfft::{num_complex::Complex, FftPlanner};
@@ -30,14 +30,21 @@ const N_LAYERS: usize = 6;
 const N_HEADS: usize = 8;
 const HEAD_DIM: usize = 64;
 
-// Special token IDs (whisper-base.en)
-const TOK_EOT: i64 = 50256;          // <|endoftext|>
-const TOK_SOT: i64 = 50258;          // <|startoftranscript|>
-const TOK_EN: i64 = 50259;           // <|en|>
-const TOK_TRANSCRIBE: i64 = 50360;   // <|transcribe|>
-const TOK_NO_TIMESTAMPS: i64 = 50363; // <|notimestamps|>
+// Special token IDs for onnx-community/whisper-base (multilingual).
+// From generation_config.json:
+//   decoder_start_token_id = 50258  (<|startoftranscript|>)
+//   forced_decoder_ids = [[1, None], [2, 50359]]  (auto language, then transcribe)
+//   eos_token_id = 50257            (<|endoftext|>)
+// Language tokens: <|en|>=50259 … <|id|>=50275 … (see added_tokens.json)
+// We auto-detect language by letting the model generate position 1 freely.
+const TOK_EOT: i64 = 50257;          // <|endoftext|> — stop generation here
+const TOK_SOT: i64 = 50258;          // <|startoftranscript|> — decoder start
+const TOK_TRANSCRIBE: i64 = 50359;   // <|transcribe|> — forced at position 2
+const TOK_NO_TIMESTAMPS: i64 = 50363; // <|notimestamps|> — suppress timestamp output
+// Language tokens (for logging / future forced-language support):
+// <|en|>=50259, <|id|>=50275, <|ms|>=50282 — full list in added_tokens.json
 
-const MAX_NEW_TOKENS: usize = 448;
+const MAX_NEW_TOKENS: usize = 150; // voice utterances are short; 448 causes long hangs on noise
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -73,8 +80,21 @@ impl WhisperStt {
         log::info!("WhisperStt: loading decoder from {decoder_path}");
         let decoder = Session::builder()?.commit_from_file(decoder_path)?;
 
+        log::info!("WhisperStt: decoder output names:");
+        for out in &decoder.outputs {
+            log::info!("  {:?}", out.name);
+        }
+
         let id_to_token = load_vocab(Path::new(vocab_path))?;
         log::info!("WhisperStt: vocab size = {}", id_to_token.len());
+
+        // Look up the actual IDs for the special tokens we care about.
+        // This reveals whether the model is multilingual or English-only
+        // (the IDs differ because en-only has no language tokens).
+        let find = |name: &str| -> Option<i64> {
+            id_to_token.iter().find(|(_, v)| v.as_str() == name).map(|(k, _)| *k)
+        };
+        log::info!("STT vocab: size={} eot={:?}", id_to_token.len(), find("<|endoftext|>"));
 
         let byte_decoder = build_byte_decoder();
         let mel_fb = build_mel_filterbank(N_MELS, N_FFT / 2 + 1, SAMPLE_RATE);
@@ -88,20 +108,19 @@ impl WhisperStt {
             return Ok(String::new());
         }
 
-        // 1. Log-mel spectrogram [1, 80, 3000]
+        log::info!("STT: {} samples → mel", samples.len());
         let mel = self.log_mel_spectrogram(samples);
 
-        // 2. Encoder: audio features → [1, 1500, 512]
+        log::info!("STT: running encoder");
         let enc_hidden = self.run_encoder(&mel)?;
-        log::debug!("WhisperStt: encoder hidden {:?}", enc_hidden.shape());
+        log::info!("STT: encoder done shape={:?}", enc_hidden.shape());
 
-        // 3. Greedy decode → token IDs
+        log::info!("STT: starting greedy decode");
         let token_ids = self.greedy_decode(&enc_hidden)?;
-        log::info!("WhisperStt: {} tokens generated", token_ids.len());
+        log::info!("STT: {} tokens generated", token_ids.len());
 
-        // 4. Detokenize → UTF-8
         let text = self.detokenize(&token_ids).trim().to_string();
-        log::info!("WhisperStt: {:?}", text);
+        log::info!("STT: {:?}", text);
         Ok(text)
     }
 }
@@ -189,141 +208,85 @@ impl WhisperStt {
 }
 
 // ---------------------------------------------------------------------------
-// Decoder with k/v cache
+// Decoder — no k/v cache, multilingual auto language detection
+//
+// The merged model's use_cache_branch=true does not output decoder k/v in the
+// present.* ports, making manual cache management impossible via this model
+// variant. Instead we always run use_cache_branch=false and feed all
+// accumulated tokens each step. This is O(n²) but fine for short utterances.
+//
+// Two-phase decode:
+//   Phase 1 — language detection: run decoder with [SOT] only and take the
+//             argmax over language-token positions (50259..50358) as the
+//             detected language.
+//   Phase 2 — text generation: seed with [SOT, LANG, TRANSCRIBE, NO_TIMESTAMPS]
+//             and greedily sample until EOT or MAX_NEW_TOKENS.
 // ---------------------------------------------------------------------------
 
-struct LayerCache {
-    dec_key: Array4<f32>, // [1, 8, past_dec, 64]
-    dec_val: Array4<f32>,
-    enc_key: Array4<f32>, // [1, 8, enc_len, 64] — filled after first step
-    enc_val: Array4<f32>,
-}
-
-impl LayerCache {
-    fn empty() -> Self {
-        Self {
-            dec_key: Array4::zeros((1, N_HEADS, 0, HEAD_DIM)),
-            dec_val: Array4::zeros((1, N_HEADS, 0, HEAD_DIM)),
-            enc_key: Array4::zeros((1, N_HEADS, 0, HEAD_DIM)),
-            enc_val: Array4::zeros((1, N_HEADS, 0, HEAD_DIM)),
-        }
-    }
-}
-
 impl WhisperStt {
-    fn greedy_decode(&self, enc_hidden: &Array3<f32>) -> anyhow::Result<Vec<i64>> {
-        let init_tokens = vec![TOK_SOT, TOK_EN, TOK_TRANSCRIBE, TOK_NO_TIMESTAMPS];
-        let mut cache: Vec<LayerCache> = (0..N_LAYERS).map(|_| LayerCache::empty()).collect();
-        let mut generated: Vec<i64> = Vec::new();
-
-        // --- Prefill (use_cache = false) ---
-        let input_ids = Array2::from_shape_vec((1, init_tokens.len()), init_tokens)?;
-        let (logits, new_cache) = self.decoder_step(&input_ids, enc_hidden, &cache, false)?;
-        cache = new_cache;
-
-        // First generated token = argmax of last prefill position
-        let seq_len = logits.shape()[1];
-        let first = argmax3(&logits, 0, seq_len - 1);
-        if first == TOK_EOT || first >= TOK_SOT {
-            return Ok(generated);
-        }
-        generated.push(first);
-
-        // --- Autoregressive generation (use_cache = true) ---
-        for _ in 0..MAX_NEW_TOKENS {
-            let last = *generated.last().unwrap();
-            let input_ids = Array2::from_shape_vec((1, 1), vec![last])?;
-            let (logits, new_cache) =
-                self.decoder_step(&input_ids, enc_hidden, &cache, true)?;
-            cache = new_cache;
-
-            let tok = argmax3(&logits, 0, 0);
-            if tok == TOK_EOT || tok >= TOK_SOT {
-                break;
-            }
-            generated.push(tok);
-        }
-
-        Ok(generated)
-    }
-
+    /// Run the ONNX decoder for one step and return the logits over the last position.
     fn decoder_step(
         &self,
-        input_ids: &Array2<i64>,
+        tokens: &[i64],
         enc_hidden: &Array3<f32>,
-        cache: &[LayerCache],
-        use_cache: bool,
-    ) -> anyhow::Result<(Array3<f32>, Vec<LayerCache>)> {
-        // Build all arrays before the inputs vec so they live long enough.
-        let use_cache_arr = Array1::from_elem((1,), use_cache);
+        dummy: &Array4<f32>,
+        use_cache_false: &Array1<bool>,
+    ) -> anyhow::Result<Array3<f32>> {
+        let n = tokens.len();
+        let input_ids = Array2::from_shape_vec((1, n), tokens.to_vec())?;
 
-        // Build the decoder input map dynamically.
         let mut inputs: Vec<(Cow<str>, DynValue)> = Vec::new();
-
-        inputs.push((
-            "input_ids".into(),
-            Tensor::<i64>::from_array(input_ids.view())?.into_dyn(),
-        ));
-        inputs.push((
-            "encoder_hidden_states".into(),
-            Tensor::<f32>::from_array(enc_hidden.view())?.into_dyn(),
-        ));
-
-        for (i, layer) in cache.iter().enumerate() {
-            inputs.push((
-                format!("past_key_values.{i}.decoder.key").into(),
-                Tensor::<f32>::from_array(layer.dec_key.view())?.into_dyn(),
-            ));
-            inputs.push((
-                format!("past_key_values.{i}.decoder.value").into(),
-                Tensor::<f32>::from_array(layer.dec_val.view())?.into_dyn(),
-            ));
-            inputs.push((
-                format!("past_key_values.{i}.encoder.key").into(),
-                Tensor::<f32>::from_array(layer.enc_key.view())?.into_dyn(),
-            ));
-            inputs.push((
-                format!("past_key_values.{i}.encoder.value").into(),
-                Tensor::<f32>::from_array(layer.enc_val.view())?.into_dyn(),
-            ));
+        inputs.push(("input_ids".into(), Tensor::<i64>::from_array(input_ids.view())?.into_dyn()));
+        inputs.push(("encoder_hidden_states".into(), Tensor::<f32>::from_array(enc_hidden.view())?.into_dyn()));
+        for i in 0..N_LAYERS {
+            inputs.push((format!("past_key_values.{i}.decoder.key").into(), Tensor::<f32>::from_array(dummy.view())?.into_dyn()));
+            inputs.push((format!("past_key_values.{i}.decoder.value").into(), Tensor::<f32>::from_array(dummy.view())?.into_dyn()));
+            inputs.push((format!("past_key_values.{i}.encoder.key").into(), Tensor::<f32>::from_array(dummy.view())?.into_dyn()));
+            inputs.push((format!("past_key_values.{i}.encoder.value").into(), Tensor::<f32>::from_array(dummy.view())?.into_dyn()));
         }
-
-        inputs.push((
-            "use_cache_branch".into(),
-            Tensor::<bool>::from_array(use_cache_arr.view())?.into_dyn(),
-        ));
+        inputs.push(("use_cache_branch".into(), Tensor::<bool>::from_array(use_cache_false.view())?.into_dyn()));
 
         let outputs = self.decoder.run(inputs)?;
-
-        // Extract logits [1, seq, vocab]
         let logits = outputs["logits"]
             .try_extract_tensor::<f32>()?
             .into_dimensionality::<Ix3>()
             .map_err(|e| anyhow::anyhow!("logits reshape: {e}"))?
             .to_owned();
+        Ok(logits)
+    }
 
-        // Extract present k/v cache
-        let mut new_cache: Vec<LayerCache> = Vec::with_capacity(N_LAYERS);
-        for i in 0..N_LAYERS {
-            let dk = extract4d(&outputs, &format!("present.{i}.decoder.key"))?;
-            let dv = extract4d(&outputs, &format!("present.{i}.decoder.value"))?;
-            let ek = extract4d(&outputs, &format!("present.{i}.encoder.key"))?;
-            let ev = extract4d(&outputs, &format!("present.{i}.encoder.value"))?;
-            new_cache.push(LayerCache { dec_key: dk, dec_val: dv, enc_key: ek, enc_val: ev });
+    fn greedy_decode(&self, enc_hidden: &Array3<f32>) -> anyhow::Result<Vec<i64>> {
+        let dummy = Array4::<f32>::zeros((1, N_HEADS, 1, HEAD_DIM));
+        let use_cache_false = Array1::from_elem((1,), false);
+
+        // Phase 1: language detection — feed [SOT], take argmax over lang range.
+        let logits = self.decoder_step(&[TOK_SOT], enc_hidden, &dummy, &use_cache_false)?;
+        let lang_tok = argmax3(&logits, 0, 0);
+        log::info!("STT: detected language token = {lang_tok}");
+
+        // Phase 2: text generation seeded with [SOT, LANG, TRANSCRIBE, NO_TIMESTAMPS].
+        let mut tokens: Vec<i64> = vec![TOK_SOT, lang_tok, TOK_TRANSCRIBE, TOK_NO_TIMESTAMPS];
+        let mut generated: Vec<i64> = Vec::new();
+
+        for step in 0..MAX_NEW_TOKENS {
+            let n = tokens.len();
+            let logits = self.decoder_step(&tokens, enc_hidden, &dummy, &use_cache_false)?;
+            let tok = argmax3(&logits, 0, n - 1);
+
+            if step < 3 {
+                log::info!("STT: step {step} tok={tok}");
+            }
+
+            if tok >= TOK_EOT {
+                break;
+            }
+            generated.push(tok);
+            tokens.push(tok);
         }
 
-        Ok((logits, new_cache))
+        log::info!("STT: generated {} tokens", generated.len());
+        Ok(generated)
     }
-}
-
-fn extract4d(outputs: &ort::session::SessionOutputs, name: &str) -> anyhow::Result<Array4<f32>> {
-    outputs[name]
-        .try_extract_tensor::<f32>()?
-        .into_dimensionality::<Ix4>()
-        .map_err(|e| anyhow::anyhow!("reshape {name}: {e}"))?
-        .to_owned()
-        .into_dimensionality::<Ix4>()
-        .map_err(|e| anyhow::anyhow!("convert {name}: {e}"))
 }
 
 fn argmax3(logits: &Array3<f32>, batch: usize, seq_pos: usize) -> i64 {
@@ -344,8 +307,8 @@ impl WhisperStt {
     fn detokenize(&self, token_ids: &[i64]) -> String {
         let mut bytes: Vec<u8> = Vec::new();
         for &id in token_ids {
-            if id >= TOK_SOT {
-                continue; // skip all special tokens
+            if id >= TOK_EOT {
+                continue;
             }
             if let Some(tok_str) = self.id_to_token.get(&id) {
                 for ch in tok_str.chars() {
