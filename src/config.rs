@@ -104,6 +104,9 @@ impl WindowStartConfig {
     }
 }
 
+/// Log window shares the same config shape as the chat window.
+pub type LogConfig = ChatConfig;
+
 /// Chat window configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatConfig {

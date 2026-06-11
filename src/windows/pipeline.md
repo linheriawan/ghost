@@ -15,45 +15,45 @@
        (update         (update              (send to
         level)          level)              STT thread)
                                                │
-┌──────────────────────────────────────────────▼──────────────────────┐
-│  THREAD: stt (whisper-base ONNX — separate, non-blocking)           │
+┌──────────────────────────────────────────────▼───────────────────────┐
+│  THREAD: stt (whisper-base ONNX — separate, non-blocking)            │
 │                                                                      │
-│   Idle ──[utterance]──► Encoding ──► Decoding ──► [SttResult]──┐   │
-│    ▲                                                             │   │
-│    └──────────────────── done ───────────────────────────────── ┘   │
+│   Idle ──[utterance]──► Encoding ──► Decoding ──► [SttResult]──┐     │
+│    ▲                                                           │     │
+│    └──────────────────── done ──────────────────────────────── ┘     │
 │                                                                      │
-│   INTERRUPT: new utterance arrives while busy → queue (drop oldest) │
+│   INTERRUPT: new utterance arrives while busy → queue (drop oldest)  │
 └──────────────────────────────────────────────────────────────────────┘
-                                                        │
+                                                       │
                                                    SttResult(raw)
-                                                        │
-┌──────────────────────────────────────────────────────▼──────────────┐
-│  THREAD: inference (llama.cpp — one job at a time, FIFO queue)      │
+                                                       │
+┌──────────────────────────────────────────────────────▼───────────────┐
+│  THREAD: inference (llama.cpp — one job at a time, FIFO queue)       │
 │                                                                      │
-│   Idle ──[Correct(raw)]──► Correcting ──[InputDraft stream]──► Idle │
+│   Idle ──[Correct(raw)]──► Correcting ──[InputDraft stream]──► Idle  │
 │    │                           │                                     │
 │    │                    (short, ~10 tokens,                          │
 │    │                     high priority)                              │
 │    │                                                                 │
-│   Idle ──[Chat(msg)] ──► Inferencing ──[ChatToken stream] ──► Idle  │
+│   Idle ──[Chat(msg)] ──► Inferencing ──[ChatToken stream] ──► Idle   │
 │                              │                                       │
 │                       (longer, streaming                             │
 │                        to chat bubbles)                              │
 │                                                                      │
-│   INTERRUPT: Chat can be queued while Correcting runs first         │
-│   FUTURE:    mistral.rs enables both to batch-run simultaneously    │
+│   INTERRUPT: Chat can be queued while Correcting runs first          │
+│   FUTURE:    mistral.rs enables both to batch-run simultaneously     │
 └──────────────────────────────────────────────────────────────────────┘
                                     │
                                ChatDone + response text
                                     │
-┌───────────────────────────────────▼─────────────────────────────────┐
-│  THREAD: tts-playback (persistent sink — NO click between segments) │
+┌───────────────────────────────────▼──────────────────────────────────┐
+│  THREAD: tts-playback (persistent sink — NO click between segments)  │
 │                                                                      │
-│   Idle ──[synthesize]──► Kokoro ──[samples]──► Sink.append() ──┐   │
-│    ▲                                                             │   │
-│    └─────────── sink drains naturally, no open/close ───────── ┘   │
+│   Idle ──[synthesize]──► Kokoro ──[samples]──► Sink.append() ──┐     │
+│    ▲                                                           │     │
+│    └─────────── sink drains naturally, no open/close ───────── ┘     │
 │                                                                      │
-│   Mic mute: brain sets mic_mute_until = now + duration              │
+│   Mic mute: brain sets mic_mute_until = now + duration               │
 └──────────────────────────────────────────────────────────────────────┘
 
 Priority / interrupt rules:

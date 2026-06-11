@@ -17,3 +17,10 @@
 ├────────────────────────────────────────────────┤
 | "Status"  | Mode: 🔘 Voice   |  🎤 Volume: 📶   |
 └────────────────────────────────────────────────┘
+
+Window:
+    Main        ghost_ui
+    Callout     ghost_ui
+    Chat        egui
+    Log         egui
+    Control     ghost_ui

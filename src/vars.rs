@@ -51,6 +51,8 @@ struct Inner {
     pub main_window: WindowState,
     pub chat_window: WindowState,
     pub callout_window: WindowState,
+    pub log_window: WindowState,
+    pub control_window: WindowState,
     pub snap_config: SnapConfig,
 }
 
@@ -91,6 +93,24 @@ impl GhostState {
                 state: WinState::NotRunning,
                 visible: false,
                 snapped: true,
+                last_set_pos: (0, 0),
+                just_resized: false,
+            },
+            log_window: WindowState {
+                rect: Rect::default(),
+                opacity: 1.0,
+                state: WinState::NotRunning,
+                visible: false,
+                snapped: false,
+                last_set_pos: (0, 0),
+                just_resized: false,
+            },
+            control_window: WindowState {
+                rect: Rect::default(),
+                opacity: 1.0,
+                state: WinState::NotRunning,
+                visible: true,
+                snapped: false,
                 last_set_pos: (0, 0),
                 just_resized: false,
             },
@@ -216,6 +236,62 @@ impl GhostState {
 
     pub fn set_main_focused(&self, focused: bool) {
         self.0.write().main_window.state = if focused {
+            WinState::Focused
+        } else {
+            WinState::Behind
+        };
+    }
+
+    // -- Log window --
+
+    pub fn log_visible(&self) -> bool {
+        self.0.read().log_window.visible
+    }
+
+    pub fn set_log_visible(&self, v: bool) {
+        self.0.write().log_window.visible = v;
+    }
+
+    pub fn log_snapped(&self) -> bool {
+        self.0.read().log_window.snapped
+    }
+
+    pub fn set_log_snapped(&self, v: bool) {
+        self.0.write().log_window.snapped = v;
+    }
+
+    pub fn log_last_set_pos(&self) -> (i32, i32) {
+        self.0.read().log_window.last_set_pos
+    }
+
+    pub fn set_log_last_set_pos(&self, x: i32, y: i32) {
+        self.0.write().log_window.last_set_pos = (x, y);
+    }
+
+    pub fn log_just_resized(&self) -> bool {
+        self.0.read().log_window.just_resized
+    }
+
+    pub fn set_log_just_resized(&self, v: bool) {
+        self.0.write().log_window.just_resized = v;
+    }
+
+    // -- Control window --
+
+    pub fn set_control_pos(&self, x: i32, y: i32) {
+        let mut inner = self.0.write();
+        inner.control_window.rect.x = x;
+        inner.control_window.rect.y = y;
+    }
+
+    pub fn set_control_size(&self, w: u32, h: u32) {
+        let mut inner = self.0.write();
+        inner.control_window.rect.width = w;
+        inner.control_window.rect.height = h;
+    }
+
+    pub fn set_control_focused(&self, focused: bool) {
+        self.0.write().control_window.state = if focused {
             WinState::Focused
         } else {
             WinState::Behind

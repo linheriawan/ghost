@@ -10,6 +10,8 @@ pub struct MenuIds {
     pub open_chat: MenuId,
     pub talk: MenuId,
     pub idle: MenuId,
+    pub ctrl: MenuId,
+    pub log: MenuId,
     pub quit: MenuId,
 }
 
@@ -23,7 +25,7 @@ pub struct TrayComponents {
 /// Commands that can be sent from tray menu
 #[derive(Debug, Clone)]
 pub enum TrayCommand {
-    OpenChat,
+    OpenChat,OpenCtrl,OpenLog,
     SetState(String), // "idle", "talk", etc.
     Quit,
 }
@@ -46,11 +48,17 @@ pub fn setup_tray(icon_path: &str) -> TrayComponents {
 
     // 2. Main Menu Items
     let open_chat_item = CheckMenuItem::new("Chat Window", true, false, None);
-    let quit_item = MenuItem::new("Quit", true, None);
-
     let open_chat_id = open_chat_item.id().clone();
+
+    let quit_item = MenuItem::new("Quit", true, None);
     let quit_id = quit_item.id().clone();
 
+    let ctrl_item = MenuItem::new("Controller", true, None);
+    let ctrl_id = ctrl_item.id().clone();
+
+    let log_item = MenuItem::new("Logs", true, None);
+    let log_id = log_item.id().clone();
+    
     // 3. Assemble everything into the main menu
     tray_menu
         .append_items(&[
@@ -58,6 +66,8 @@ pub fn setup_tray(icon_path: &str) -> TrayComponents {
             &PredefinedMenuItem::separator(),
             &state_submenu,
             &PredefinedMenuItem::separator(),
+            &ctrl_item,
+            &log_item,
             &quit_item,
         ])
         .unwrap();
@@ -67,7 +77,7 @@ pub fn setup_tray(icon_path: &str) -> TrayComponents {
 
     let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
-        .with_tooltip("Ghost")
+        .with_tooltip("Ghost Tray")
         .with_icon(icon)
         .build()
         .unwrap();
@@ -76,6 +86,8 @@ pub fn setup_tray(icon_path: &str) -> TrayComponents {
         open_chat: open_chat_id,
         talk: talk_id,
         idle: idle_id,
+        ctrl: ctrl_id,
+        log: log_id,
         quit: quit_id,
     };
 
@@ -91,6 +103,10 @@ pub fn poll_menu_event(menu_ids: &MenuIds) -> Option<TrayCommand> {
             return Some(TrayCommand::SetState("talk".to_string()));
         } else if event.id == menu_ids.idle {
             return Some(TrayCommand::SetState("idle".to_string()));
+        } else if event.id == menu_ids.log {
+            return Some(TrayCommand::OpenLog);
+        } else if event.id == menu_ids.ctrl {
+            return Some(TrayCommand::OpenCtrl);
         } else if event.id == menu_ids.quit {
             return Some(TrayCommand::Quit);
         }

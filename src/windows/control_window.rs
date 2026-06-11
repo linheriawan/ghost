@@ -25,15 +25,15 @@ enum SkinLoadState {
     Static,
 }
 
-/// Visual output from ui_design() — the "what it looks like" for the main window
-struct MainUiDesign {
+/// Visual output from ui_design() — the "what it looks like" for the control window
+struct ControlUiDesign {
     buttons: Vec<Button>,
     layers: Vec<Layer>,
     loading_layer: Option<Layer>,
     still_skin_data: Option<SkinData>,
 }
 
-/// Main application state
+/// Control application state
 pub struct App {
     config: Config,
     buttons: Vec<Button>,
@@ -59,7 +59,7 @@ pub struct App {
     state: GhostState,
 }
 
-/// Define "what the main window looks like" — all visual setup in one place.
+/// Define "what the control window looks like" — all visual setup in one place.
 ///
 /// Receives config values as input and returns the visual components.
 /// This makes visual modifications easier: only look at this one function.
@@ -69,7 +69,7 @@ fn ui_design(
     skin_height: u32,
     persona_meta: Option<&PersonaMeta>,
     load_state_is_loading: bool,
-) -> MainUiDesign {
+) -> ControlUiDesign {
     // Create buttons from config
     let buttons = ui::create_buttons_from_config(&config.buttons);
 
@@ -167,7 +167,7 @@ fn ui_design(
         (None, None)
     };
 
-    MainUiDesign {
+    ControlUiDesign {
         buttons,
         layers,
         loading_layer,
@@ -250,7 +250,7 @@ impl App {
 
 impl GhostApp for App {
     fn init_gpu(&mut self, gpu: GpuResources<'_>) {
-        log::info!("Main window GPU initialized");
+        log::info!("Control window GPU initialized");
 
         // Initialize animated skin GPU resources (if already loaded)
         if let Some(ref mut animated_skin) = self.animated_skin {
@@ -369,13 +369,13 @@ impl GhostApp for App {
                 // Note: Don't update skin_size on resize. The skin dimensions are fixed,
                 // and layers should always be positioned relative to the original skin size.
                 // The resize event may give different values on HiDPI displays.
-                self.state.set_main_size(width, height);
+                self.state.set_control_size(width, height);
             }
             GhostEvent::Moved(x, y) => {
-                self.state.set_main_pos(x, y);
+                self.state.set_control_pos(x, y);
             }
             GhostEvent::FocusChanged(focused) => {
-                self.state.set_main_focused(focused);
+                self.state.set_control_focused(focused);
             }
             _ => {}
         }
