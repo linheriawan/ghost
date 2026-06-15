@@ -2,6 +2,8 @@ use ghost_ui::{GhostApp, GhostEvent, GpuResources, Skin};
 
 use crate::tray::{self, MenuIds, TrayCommand};
 use crate::windows::chat_window::{ChatSender, ChatWindowCommand};
+use crate::windows::control_window::{ControlSender, ControlWindowCommand};
+use crate::windows::log_window::{LogSender, LogWindowCommand};
 use crate::windows::main_window;
 
 /// Owns application-level concerns (tray, quit signal) and delegates all
@@ -10,15 +12,19 @@ pub struct Coordinator {
     pub inner: main_window::App,
     menu_ids: MenuIds,
     chat_tx: ChatSender,
+    log_tx: LogSender,
+    ctrl_tx: ControlSender,
     should_quit: bool,
 }
 
 impl Coordinator {
-    pub fn new(inner: main_window::App, menu_ids: MenuIds, chat_tx: ChatSender) -> Self {
+    pub fn new(inner: main_window::App, menu_ids: MenuIds, chat_tx: ChatSender, log_tx: LogSender, ctrl_tx: ControlSender) -> Self {
         Self {
             inner,
             menu_ids,
             chat_tx,
+            log_tx,
+            ctrl_tx,
             should_quit: false,
         }
     }
@@ -32,10 +38,13 @@ impl Coordinator {
                 let _ = self.chat_tx.send(ChatWindowCommand::Show);
                 log::info!("Tray: open chat");
             }
-            TrayCommand::OpenCtrl | TrayCommand::OpenLog => {
-                // TODO: wire log_tx / ctrl_tx from AppBus once those windows
-                // have their own command senders.
-                log::info!("Tray: open ctrl/log (not yet wired)");
+            TrayCommand::OpenCtrl => {
+                let _ = self.ctrl_tx.send(ControlWindowCommand::Show);
+                log::info!("Tray: open controller");
+            }
+            TrayCommand::OpenLog => {
+                let _ = self.log_tx.send(LogWindowCommand::Show);
+                log::info!("Tray: open log");
             }
             TrayCommand::SetState(s) => {
                 self.inner.set_animation_state(&s);

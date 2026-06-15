@@ -14,7 +14,6 @@ use tao::event_loop::EventLoop;
 use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
-use crate::brain::{BrainCommand, BrainResponse};
 use crate::config::LogConfig;
 use crate::vars::GhostState;
 
@@ -134,12 +133,6 @@ pub struct LogWindow {
     modifiers: egui::Modifiers,
     /// Whether the window currently has focus.
     focused: bool,
-    /// Channel to send commands to the brain (LLM).
-    brain_tx: Option<Sender<BrainCommand>>,
-    /// Channel to receive responses from the brain.
-    brain_rx: Option<Receiver<BrainResponse>>,
-    /// Whether we're waiting for the brain to reply.
-    waiting_for_brain: bool,
     /// Whether voice mode is active (mic → STT → LLM → TTS).
     voice_mode: bool,
     /// Voice status label (stripped of the `##....` level bar portion).
@@ -158,8 +151,6 @@ impl LogWindow {
         assistant_name: Option<String>,
         state: GhostState,
         Log_config: &LogConfig,
-        brain_tx: Option<Sender<BrainCommand>>,
-        brain_rx: Option<Receiver<BrainResponse>>,
     ) -> Self {
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
@@ -261,9 +252,6 @@ impl LogWindow {
             pending_events: Vec::new(),
             modifiers: egui::Modifiers::NONE,
             focused: false,
-            brain_tx,
-            brain_rx,
-            waiting_for_brain: false,
             voice_mode: false,
             voice_status: String::new(),
             audio_level: 0.0,
@@ -349,106 +337,6 @@ impl LogWindow {
         }
 
         // 1b. Poll brain responses
-        if let Some(ref brain_rx) = self.brain_rx {
-            loop {
-                match brain_rx.try_recv() {
-                    Ok(resp) => match resp {
-                        BrainResponse::ChatToken { token } => {
-                            if self.waiting_for_brain {
-                                // Create the assistant bubble on the first token.
-                                let last_is_assistant = self
-                                    .messages
-                                    .last()
-                                    .map(|m| m.role == "assistant")
-                                    .unwrap_or(false);
-                                if !last_is_assistant {
-                                    // Strip leading newlines — the model echoes the
-                                    // newline from `<|im_start|>assistant\n` as first token.
-                                    let trimmed = token.trim_start_matches('\n').to_string();
-                                    if !trimmed.is_empty() {
-                                        self.messages.push(LogMessage {
-                                            role: "assistant".to_string(),
-                                            content: trimmed,
-                                        });
-                                    }
-                                } else if let Some(last) = self.messages.last_mut() {
-                                    last.content.push_str(&token);
-                                }
-                                self.needs_repaint = true;
-                            }
-                        }
-                        BrainResponse::ChatDone => {
-                            self.waiting_for_brain = false;
-                            if self.voice_mode {
-                                self.voice_status = "Listening".to_string();
-                                self.audio_level = 0.0;
-                            }
-                            self.needs_repaint = true;
-                        }
-                        BrainResponse::Error { message } => {
-                            self.messages.push(LogMessage {
-                                role: "assistant".to_string(),
-                                content: format!("[Error] {}", message),
-                            });
-                            self.waiting_for_brain = false;
-                            self.needs_repaint = true;
-                        }
-                        // SpeechReady removed — brain plays audio directly via PlaybackSink.
-                        BrainResponse::InputDraft { text } => {
-                            // Voice pipeline is writing to the input box in real time.
-                            self.input_text = text;
-                            self.needs_repaint = true;
-                        }
-                        BrainResponse::Transcription { text } => {
-                            // Final corrected transcription — set input box then auto-send.
-                            self.input_text = text.clone();
-                            let msg = text.trim().to_string();
-                            if !msg.is_empty() {
-                                self.messages.push(LogMessage {
-                                    role: "user".to_string(),
-                                    content: msg.clone(),
-                                });
-                                self.voice_status = "Thinking...".to_string();
-                                self.audio_level = 0.0;
-                                if let Some(ref tx) = self.brain_tx {
-                                    let _ = tx.send(BrainCommand::Chat { message: msg });
-                                    self.waiting_for_brain = true;
-                                }
-                                self.input_text.clear();
-                            }
-                            self.needs_repaint = true;
-                        }
-                        BrainResponse::VoiceModeChanged(on) => {
-                            self.voice_mode = on;
-                            self.voice_status = if on { "Listening".to_string() } else { String::new() };
-                            self.audio_level = 0.0;
-                            self.needs_repaint = true;
-                        }
-                        BrainResponse::VoiceStatus(status) => {
-                            let (label, level) = parse_voice_status(&status);
-                            self.voice_status = label.to_string();
-                            if level > 0.0 {
-                                self.audio_level = level;
-                            }
-                            self.needs_repaint = true;
-                        }
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        // Brain thread died — clear waiting state and notify user
-                        if self.waiting_for_brain {
-                            self.messages.push(LogMessage {
-                                role: "assistant".to_string(),
-                                content: "[Brain disconnected]".to_string(),
-                            });
-                            self.waiting_for_brain = false;
-                            self.needs_repaint = true;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
 
         // 2. Update visibility in GhostState
         self.state.set_log_visible(self.visible);
@@ -717,8 +605,6 @@ impl LogWindow {
         let messages = self.messages.clone();
         let mut input_text = std::mem::take(&mut self.input_text);
         let on_send = self.on_send.clone();
-        let brain_tx = self.brain_tx.clone();
-        let waiting_for_brain = self.waiting_for_brain;
         let assistant_name = self.assistant_name.clone();
         let voice_mode = self.voice_mode;
         let voice_status = self.voice_status.clone();
@@ -812,8 +698,7 @@ impl LogWindow {
                                     .min_size(egui::vec2(btn_w, 22.0));
 
                                     send_action = (ui.add(send_btn).clicked() || enter)
-                                        && !input_text.trim().is_empty()
-                                        && !waiting_for_brain;
+                                        && !input_text.trim().is_empty();
                                 });
                             });
 
@@ -825,17 +710,6 @@ impl LogWindow {
                                 });
                                 if let Some(ref sender) = on_send {
                                     let _ = sender.send(user_msg.clone());
-                                }
-                                if let Some(ref tx) = brain_tx {
-                                    let _ = tx.send(BrainCommand::Chat { message: user_msg });
-                                } else {
-                                    new_messages.push(LogMessage {
-                                        role: "assistant".to_string(),
-                                        content: format!(
-                                            "You said: \"{}\" (No brain configured)",
-                                            user_msg
-                                        ),
-                                    });
                                 }
                                 input_text.clear();
                             }
@@ -889,15 +763,9 @@ impl LogWindow {
                                         let text_sel = ui.selectable_label(!voice_mode, "Text");
                                         let voice_sel = ui.selectable_label(voice_mode, "Voice");
                                         if text_sel.clicked() && voice_mode {
-                                            if let Some(ref tx) = brain_tx {
-                                                let _ = tx.send(BrainCommand::SetVoiceMode(false));
-                                            }
                                             new_voice_mode = Some(false);
                                         }
                                         if voice_sel.clicked() && !voice_mode {
-                                            if let Some(ref tx) = brain_tx {
-                                                let _ = tx.send(BrainCommand::SetVoiceMode(true));
-                                            }
                                             new_voice_mode = Some(true);
                                         }
                                     });
@@ -991,43 +859,13 @@ impl LogWindow {
                             }
 
                             // Show "thinking..." indicator when waiting for brain
-                            if waiting_for_brain {
-                                ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                                    ui.allocate_ui(egui::vec2(panel_width * bubble_max_width_ratio, 0.0), |ui| {
-                                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                            ui.label(
-                                                egui::RichText::new(&assistant_name)
-                                                    .color(role_label_color)
-                                                    .size(role_label_size)
-                                            );
-                                            egui::Frame::none()
-                                                .fill(assistant_bubble_bg)
-                                                .rounding(bubble_rounding)
-                                                .inner_margin(bubble_padding)
-                                                .show(ui, |ui| {
-                                                    ui.label(
-                                                        egui::RichText::new("thinking...")
-                                                            .color(egui::Color32::from_rgb(160, 160, 180))
-                                                            .italics()
-                                                    );
-                                                });
-                                        });
-                                    });
-                                });
-                                ui.add_space(message_spacing);
-                            }
+                            
                         });
                 });
         });
 
         // Update state with new messages and input
-        let sent_to_brain = new_messages.iter().any(|m| m.role == "user")
-            && self.brain_tx.is_some()
-            && new_messages.iter().all(|m| m.role != "assistant");
-        self.messages.extend(new_messages);
-        if sent_to_brain {
-            self.waiting_for_brain = true;
-        }
+        
         self.input_text = input_text;
         if let Some(vm) = new_voice_mode {
             self.voice_mode = vm;

@@ -4,6 +4,7 @@ use crate::brain::{BrainCommand, BrainResponse, BrainService};
 use crate::config::Config;
 use crate::windows::callout_window::{create_callout_channel, CalloutCommand, CalloutSender};
 use crate::windows::chat_window::{create_chat_channel, ChatReceiver, ChatSender};
+use crate::windows::control_window::{create_control_channel, ControlReceiver, ControlSender};
 use crate::windows::log_window::{create_Log_channel, LogReceiver, LogSender};
 
 /// All inter-component channel endpoints, created once and distributed to windows.
@@ -15,12 +16,14 @@ pub struct AppBus {
     pub chat_tx: ChatSender,
     pub callout_tx: CalloutSender,
     pub log_tx: LogSender,
+    pub ctrl_tx: ControlSender,
     pub brain_tx: Option<Sender<BrainCommand>>,
 
     // -- receivers (each moved into exactly one window) --
     pub chat_rx: ChatReceiver,
     pub callout_rx: Receiver<CalloutCommand>,
     pub log_rx: LogReceiver,
+    pub ctrl_rx: ControlReceiver,
     pub brain_rx: Option<Receiver<BrainResponse>>,
 }
 
@@ -30,6 +33,7 @@ impl AppBus {
         let (chat_tx, chat_rx) = create_chat_channel();
         let (callout_tx, callout_rx) = create_callout_channel();
         let (log_tx, log_rx) = create_Log_channel();
+        let (ctrl_tx, ctrl_rx) = create_control_channel();
 
         let (brain_tx, brain_rx) = if let Some(ref brain_config) = config.brain {
             log::info!("Brain config found, spawning BrainService...");
@@ -45,10 +49,12 @@ impl AppBus {
             chat_tx,
             callout_tx,
             log_tx,
+            ctrl_tx,
             brain_tx,
             chat_rx,
             callout_rx,
             log_rx,
+            ctrl_rx,
             brain_rx,
         }
     }

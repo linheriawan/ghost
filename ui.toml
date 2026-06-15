@@ -14,7 +14,7 @@ offset = [0, 0]
 # For animated skin, the directory should contain subdirectories: idle/, talk/, think/, etc.
 # Each subdirectory should have frame_0001.png, frame_0002.png, etc.
 # path = "assets/persona/はく.persona.zip"
-path = "assets/raw/Tania.png"
+path = "assets/circa_bot.png"
 # Set to true for animated frame sequences
 animated = false
 # Frames per second for animation playback

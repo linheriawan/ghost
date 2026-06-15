@@ -10,6 +10,7 @@ use wgpu::TextureFormat;
 
 use super::callout_window::{CalloutCommand, CalloutSender};
 use crate::config::Config;
+use crate::skin::SkinBundle;
 use crate::ui;
 use crate::vars::GhostState;
 
@@ -176,21 +177,15 @@ fn ui_design(
 }
 
 impl App {
-    /// Create new app from configuration
     pub fn new(
         config: Config,
-        skin_width: u32,
-        skin_height: u32,
+        skin: SkinBundle,
         callout_sender: CalloutSender,
-        animated_skin: Option<AnimatedSkin>,
-        persona_meta: Option<PersonaMeta>,
-        skin_load_receiver: Option<mpsc::Receiver<AnimatedSkin>>,
         state: GhostState,
     ) -> Self {
-        // Determine load state
-        let load_state = if let Some(receiver) = skin_load_receiver {
+        let load_state = if let Some(receiver) = skin.load_rx {
             SkinLoadState::Loading { receiver }
-        } else if animated_skin.is_some() {
+        } else if skin.animated.is_some() {
             SkinLoadState::Ready
         } else {
             SkinLoadState::Static
@@ -198,12 +193,11 @@ impl App {
 
         let load_state_is_loading = matches!(load_state, SkinLoadState::Loading { .. });
 
-        // Build all visual components via ui_design()
         let design = ui_design(
             &config,
-            skin_width,
-            skin_height,
-            persona_meta.as_ref(),
+            skin.width,
+            skin.height,
+            skin.persona.as_ref(),
             load_state_is_loading,
         );
 
@@ -211,12 +205,12 @@ impl App {
             config,
             buttons: design.buttons,
             callout_sender,
-            skin_size: (skin_width, skin_height),
+            skin_size: (skin.width, skin.height),
             layers: design.layers,
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
             texture_format: None,
-            animated_skin,
+            animated_skin: skin.animated,
             load_state,
             still_skin: None,
             still_skin_data: design.still_skin_data,

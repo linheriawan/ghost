@@ -19,26 +19,19 @@
 //!
 //! fn main() {
 //!     let event_loop = EventLoop::new();
-//!
-//!     // Load skin data (can be done before window creation)
 //!     let skin_data = skin("assets/character.png").unwrap();
-//!
-//!     // Set up icons
 //!     let mut app_icon = icon("assets/icon.png").unwrap();
 //!     app_icon.setup_all().expect("Failed to setup icons");
-//!
-//!     // Create window
-//!     let window = GhostWindowBuilder::new()
+//!     let _window = GhostWindowBuilder::new()
 //!         .with_size(skin_data.width(), skin_data.height())
 //!         .with_always_on_top(true)
 //!         .with_draggable(true)
 //!         .with_skin_data(&skin_data)
-//!         .with_opacity_focused(1.0)    // Opaque when focused
-//!         .with_opacity_unfocused(0.5)  // Semi-transparent when unfocused
+//!         .with_opacity_focused(1.0)
+//!         .with_opacity_unfocused(0.5)
 //!         .build(&event_loop)
 //!         .expect("Failed to create window");
-//!
-//!     ghost_ui::run(window, event_loop);
+//!     // Pass window + event_loop to your application's run() function
 //! }
 //! ```
 
@@ -67,7 +60,6 @@ pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer, TextAlign, TextV
 
 // Window
 pub use window::{
-    run, run_with_app, run_with_app_and_callout, run_with_app_callout_and_extra,
     CalloutApp, CalloutWindowConfig, ExtraWindow,
     GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
 };

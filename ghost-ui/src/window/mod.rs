@@ -12,8 +12,8 @@ use crate::elements::Widget;
 
 use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
-    event::{ElementState, Event, MouseButton, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event::WindowEvent,
+    event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
 use thiserror::Error;
@@ -508,6 +508,90 @@ impl GhostWindow {
     pub fn set_alpha_threshold(&mut self, threshold: u8) {
         self.data.config.alpha_threshold = threshold;
     }
+
+    /// Initialize a GhostApp's GPU resources and return a WidgetRenderer.
+    /// Returns None if the renderer is not yet ready (call again on next redraw).
+    pub fn init_app_gpu<A: GhostApp>(&mut self, app: &mut A) -> Option<crate::renderer::WidgetRenderer> {
+        if let Some(ref renderer) = self.renderer {
+            for btn_img in app.button_images_mut() {
+                btn_img.init_gpu(renderer.device(), renderer.queue());
+            }
+            app.init_gpu(GpuResources {
+                device: renderer.device(),
+                queue: renderer.queue(),
+                format: renderer.format(),
+            });
+            Some(crate::renderer::WidgetRenderer::new(renderer.device(), renderer.queue(), renderer.format()))
+        } else {
+            None
+        }
+    }
+
+    /// Prepare widgets (buttons, labels, marquees) and update marquee layout widths.
+    /// Call before prepare_app and render_with_widgets_and_app.
+    pub fn widget_prepare<A: GhostApp>(
+        &self,
+        widget_renderer: &mut crate::renderer::WidgetRenderer,
+        app: &mut A,
+        viewport: [f32; 2],
+    ) {
+        if let Some(ref renderer) = self.renderer {
+            let sf = self.data.window.scale_factor() as f32;
+            let marquee_widths = {
+                let buttons = app.buttons();
+                let button_images = app.button_images();
+                let labels = app.labels();
+                let marquees = app.marquee_labels();
+                widget_renderer.prepare(
+                    renderer.device(), renderer.queue(),
+                    &buttons, &button_images, &labels, &marquees,
+                    viewport, sf,
+                )
+            };
+            if !marquee_widths.is_empty() {
+                let mut marquees_mut = app.marquee_labels_mut();
+                for (idx, width) in marquee_widths {
+                    if let Some(m) = marquees_mut.get_mut(idx) {
+                        m.set_text_width(width);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Prepare a GhostApp for the current frame (call before render_with_widgets_and_app).
+    pub fn prepare_app<A: GhostApp>(&self, app: &mut A, viewport: [f32; 2]) {
+        if let Some(ref renderer) = self.renderer {
+            let sf = self.data.window.scale_factor() as f32;
+            let opacity = self.data.current_opacity;
+            app.prepare(renderer.device(), renderer.queue(), viewport, sf, opacity);
+        }
+    }
+
+    /// Initialize a CalloutApp's GPU resources.
+    pub fn init_callout_gpu<C: CalloutApp>(&mut self, app: &mut C) {
+        if let Some(ref renderer) = self.renderer {
+            app.init_gpu(renderer.device(), renderer.queue(), renderer.format());
+        }
+    }
+
+    /// Prepare a CalloutApp for the current frame (always full opacity).
+    pub fn prepare_callout<C: CalloutApp>(&self, app: &mut C, viewport: [f32; 2]) {
+        if let Some(ref renderer) = self.renderer {
+            let sf = self.data.window.scale_factor() as f32;
+            app.prepare(renderer.device(), renderer.queue(), viewport, sf, 1.0);
+        }
+    }
+
+    /// Show or hide the underlying window.
+    pub fn set_visible(&self, visible: bool) {
+        self.data.window.set_visible(visible);
+    }
+
+    /// Set keyboard focus to this window.
+    pub fn set_focus(&self) {
+        self.data.window.set_focus();
+    }
 }
 
 /// Events that can be emitted by the ghost window
@@ -617,373 +701,6 @@ pub trait GhostApp {
     ) {}
 }
 
-/// Run the ghost window event loop with custom event handling.
-///
-/// This takes ownership of the GhostWindow and runs until the window is closed.
-pub fn run_with_app<A: GhostApp + 'static>(
-    mut ghost_window: GhostWindow,
-    event_loop: EventLoop<()>,
-    mut app: A,
-) {
-    use std::time::Instant;
-
-    let mut last_frame = Instant::now();
-    let mut widget_renderer: Option<crate::renderer::WidgetRenderer> = None;
-    let mut gpu_initialized = false;
-
-    event_loop.run(move |event, _, control_flow| {
-        // Always use Poll for continuous rendering
-        *control_flow = ControlFlow::Poll;
-
-        let window_size = ghost_window.window().inner_size();
-        let window_height = window_size.height as f32;
-
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::Focused(focused),
-                ..
-            } => {
-                ghost_window.handle_focus(focused);
-                app.on_event(GhostEvent::FocusChanged(focused));
-                ghost_window.request_redraw();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                ghost_window.handle_cursor_moved(position);
-
-                // Update button hover states
-                let cursor_x = position.x as f32;
-                let cursor_y = position.y as f32;
-                for button in app.buttons_mut() {
-                    button.update_hover(cursor_x, cursor_y, window_height);
-                }
-                for button_image in app.button_images_mut() {
-                    button_image.update_hover(cursor_x, cursor_y, window_height);
-                }
-
-                ghost_window.request_redraw();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorLeft { .. },
-                ..
-            } => {
-                ghost_window.handle_cursor_left();
-
-                // Reset button states
-                for button in app.buttons_mut() {
-                    button.update_hover(-1.0, -1.0, window_height);
-                }
-                for button_image in app.button_images_mut() {
-                    button_image.update_hover(-1.0, -1.0, window_height);
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    button: MouseButton::Left,
-                    ..
-                },
-                ..
-            } => {
-                if let Some(cursor_pos) = ghost_window.cursor_position() {
-                    let cursor_x = cursor_pos.x as f32;
-                    let cursor_y = cursor_pos.y as f32;
-
-                    // Check if any button was pressed
-                    let mut button_pressed = false;
-                    for button in app.buttons_mut() {
-                        if button.handle_press(cursor_x, cursor_y, window_height) {
-                            button_pressed = true;
-                            break;
-                        }
-                    }
-                    if !button_pressed {
-                        for button_image in app.button_images_mut() {
-                            if button_image.handle_press(cursor_x, cursor_y, window_height) {
-                                button_pressed = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !button_pressed && ghost_window.should_handle_click() && ghost_window.is_draggable() {
-                        ghost_window.drag();
-                    }
-
-                    ghost_window.request_redraw();
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput {
-                    state: ElementState::Released,
-                    button: MouseButton::Left,
-                    ..
-                },
-                ..
-            } => {
-                if let Some(cursor_pos) = ghost_window.cursor_position() {
-                    let cursor_x = cursor_pos.x as f32;
-                    let cursor_y = cursor_pos.y as f32;
-
-                    // Check if any button was released (clicked) - collect IDs first
-                    let mut clicked_ids: Vec<_> = app
-                        .buttons_mut()
-                        .iter_mut()
-                        .filter_map(|button| {
-                            if button.handle_release(cursor_x, cursor_y, window_height) {
-                                Some(button.id())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    // Also check image buttons
-                    let img_clicked_ids: Vec<_> = app
-                        .button_images_mut()
-                        .iter_mut()
-                        .filter_map(|button| {
-                            if button.handle_release(cursor_x, cursor_y, window_height) {
-                                Some(button.id())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    clicked_ids.extend(img_clicked_ids);
-
-                    // Then emit events
-                    for id in clicked_ids {
-                        app.on_event(GhostEvent::ButtonClicked(id));
-                    }
-
-                    ghost_window.request_redraw();
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::Resized(size),
-                ..
-            } => {
-                ghost_window.handle_resize(size.width, size.height);
-                app.on_event(GhostEvent::Resized(size.width, size.height));
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::Moved(position),
-                ..
-            } => {
-                app.on_event(GhostEvent::Moved(position.x, position.y));
-            }
-
-            Event::MainEventsCleared => {
-                let now = Instant::now();
-                let delta = now.duration_since(last_frame).as_secs_f32();
-                last_frame = now;
-
-                app.update(delta);
-                app.on_event(GhostEvent::Update(delta));
-
-                // Update marquee label animations
-                for marquee in app.marquee_labels_mut() {
-                    marquee.update(delta);
-                }
-
-                // Check if app wants to quit
-                if app.should_quit() {
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
-
-                ghost_window.request_redraw();
-            }
-
-            Event::RedrawRequested(_) => {
-                // Initialize GPU resources if needed
-                if !gpu_initialized {
-                    if let Some(ref renderer) = ghost_window.renderer {
-                        // Initialize widget renderer
-                        widget_renderer = Some(crate::renderer::WidgetRenderer::new(
-                            renderer.device(),
-                            renderer.queue(),
-                            renderer.format(),
-                        ));
-
-                        // Initialize image button GPU resources
-                        for btn_img in app.button_images_mut() {
-                            btn_img.init_gpu(renderer.device(), renderer.queue());
-                        }
-
-                        // Let app initialize its GPU resources
-                        app.init_gpu(GpuResources {
-                            device: renderer.device(),
-                            queue: renderer.queue(),
-                            format: renderer.format(),
-                        });
-
-                        gpu_initialized = true;
-                    }
-                }
-
-                // Prepare widgets for rendering
-                let viewport = [window_size.width as f32, window_size.height as f32];
-                let mut marquee_widths = Vec::new();
-                if let (Some(ref mut wid_renderer), Some(ref renderer)) =
-                    (&mut widget_renderer, &ghost_window.renderer)
-                {
-                    let scale_factor = ghost_window.window().scale_factor() as f32;
-                    let buttons: Vec<&crate::elements::Button> = app.buttons();
-                    let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
-                    let labels: Vec<&crate::elements::Label> = app.labels();
-                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
-                    marquee_widths = wid_renderer.prepare(
-                        renderer.device(),
-                        renderer.queue(),
-                        &buttons,
-                        &button_images,
-                        &labels,
-                        &marquees,
-                        viewport,
-                        scale_factor,
-                    );
-                }
-                // Apply measured text widths to marquee labels
-                if !marquee_widths.is_empty() {
-                    let mut marquees_mut = app.marquee_labels_mut();
-                    for (idx, width) in marquee_widths {
-                        if let Some(m) = marquees_mut.get_mut(idx) {
-                            m.set_text_width(width);
-                        }
-                    }
-                }
-
-                // Let app prepare its rendering (callouts, etc.)
-                if let Some(ref renderer) = ghost_window.renderer {
-                    let scale_factor = ghost_window.window().scale_factor() as f32;
-                    let opacity = ghost_window.opacity();
-                    app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, opacity);
-                }
-
-                // Render with widgets and app's extra rendering
-                let render_result = ghost_window.render_with_widgets_and_app(
-                    widget_renderer.as_ref(),
-                    &mut app,
-                );
-                if let Err(e) = render_result {
-                    log::error!("Render error: {:?}", e);
-                    match e {
-                        wgpu::SurfaceError::Lost => {
-                            let size = ghost_window.window().inner_size();
-                            ghost_window.handle_resize(size.width, size.height);
-                        }
-                        wgpu::SurfaceError::OutOfMemory => {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
-            }
-
-            _ => (),
-        }
-    });
-}
-
-/// Run the ghost window event loop.
-///
-/// This takes ownership of the GhostWindow and runs until the window is closed.
-pub fn run(mut ghost_window: GhostWindow, event_loop: EventLoop<()>) {
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::Focused(focused),
-                ..
-            } => {
-                ghost_window.handle_focus(focused);
-                ghost_window.request_redraw();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                ghost_window.handle_cursor_moved(position);
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CursorLeft { .. },
-                ..
-            } => {
-                ghost_window.handle_cursor_left();
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    button: MouseButton::Left,
-                    ..
-                },
-                ..
-            } => {
-                if ghost_window.should_handle_click() && ghost_window.is_draggable() {
-                    ghost_window.drag();
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::Resized(size),
-                ..
-            } => {
-                ghost_window.handle_resize(size.width, size.height);
-            }
-
-            Event::MainEventsCleared => {
-                ghost_window.request_redraw();
-            }
-
-            Event::RedrawRequested(_) => {
-                if let Err(e) = ghost_window.render() {
-                    log::error!("Render error: {:?}", e);
-                    match e {
-                        wgpu::SurfaceError::Lost => {
-                            let size = ghost_window.window().inner_size();
-                            ghost_window.handle_resize(size.width, size.height);
-                        }
-                        wgpu::SurfaceError::OutOfMemory => {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
-            }
-
-            _ => (),
-        }
-    });
-}
-
 /// Application trait for callout rendering
 pub trait CalloutApp {
     /// Called once when GPU resources are available
@@ -997,297 +714,6 @@ pub trait CalloutApp {
 
     /// Called on update (for animations). Returns true if redraw is needed.
     fn update(&mut self, _delta: f32) -> bool { false }
-}
-
-/// Run the ghost window with a linked callout window.
-///
-/// The callout window follows the main window, positioned at the given offset.
-pub fn run_with_app_and_callout<A, C>(
-    mut main_window: GhostWindow,
-    mut callout_window: GhostWindow,
-    callout_offset: [i32; 2],
-    event_loop: EventLoop<()>,
-    mut app: A,
-    mut callout_app: C,
-) where
-    A: GhostApp + 'static,
-    C: CalloutApp + 'static,
-{
-    use std::time::Instant;
-
-    let main_window_id = main_window.window().id();
-    let callout_window_id = callout_window.window().id();
-
-    let mut last_frame = Instant::now();
-    let mut widget_renderer: Option<crate::renderer::WidgetRenderer> = None;
-    let mut main_gpu_initialized = false;
-    let mut callout_gpu_initialized = false;
-
-    // Get scale factor for converting logical to physical offsets
-    let scale_factor = main_window.window().scale_factor();
-    let scaled_callout_offset = [
-        (callout_offset[0] as f64 * scale_factor) as i32,
-        (callout_offset[1] as f64 * scale_factor) as i32,
-    ];
-
-    // Position callout window initially
-    if let Some((x, y)) = main_window.outer_position() {
-        callout_window.set_position(x + scaled_callout_offset[0], y + scaled_callout_offset[1]);
-    }
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-
-        match event {
-            Event::WindowEvent { window_id, event, .. } if window_id == main_window_id => {
-                let window_size = main_window.window().inner_size();
-                let window_height = window_size.height as f32;
-
-                match event {
-                    WindowEvent::Focused(focused) => {
-                        main_window.handle_focus(focused);
-                        app.on_event(GhostEvent::FocusChanged(focused));
-                        main_window.request_redraw();
-                    }
-
-                    WindowEvent::CursorMoved { position, .. } => {
-                        main_window.handle_cursor_moved(position);
-                        let cursor_x = position.x as f32;
-                        let cursor_y = position.y as f32;
-                        for button in app.buttons_mut() {
-                            button.update_hover(cursor_x, cursor_y, window_height);
-                        }
-                        for button_image in app.button_images_mut() {
-                            button_image.update_hover(cursor_x, cursor_y, window_height);
-                        }
-                        main_window.request_redraw();
-                    }
-
-                    WindowEvent::CursorLeft { .. } => {
-                        main_window.handle_cursor_left();
-                        for button in app.buttons_mut() {
-                            button.update_hover(-1.0, -1.0, window_height);
-                        }
-                        for button_image in app.button_images_mut() {
-                            button_image.update_hover(-1.0, -1.0, window_height);
-                        }
-                    }
-
-                    WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        if let Some(cursor_pos) = main_window.cursor_position() {
-                            let cursor_x = cursor_pos.x as f32;
-                            let cursor_y = cursor_pos.y as f32;
-                            let mut button_pressed = false;
-                            for button in app.buttons_mut() {
-                                if button.handle_press(cursor_x, cursor_y, window_height) {
-                                    button_pressed = true;
-                                    break;
-                                }
-                            }
-                            if !button_pressed {
-                                for button_image in app.button_images_mut() {
-                                    if button_image.handle_press(cursor_x, cursor_y, window_height) {
-                                        button_pressed = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !button_pressed && main_window.should_handle_click() && main_window.is_draggable() {
-                                main_window.drag();
-                            }
-                            main_window.request_redraw();
-                        }
-                    }
-
-                    WindowEvent::MouseInput {
-                        state: ElementState::Released,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        if let Some(cursor_pos) = main_window.cursor_position() {
-                            let cursor_x = cursor_pos.x as f32;
-                            let cursor_y = cursor_pos.y as f32;
-                            let mut clicked_ids: Vec<_> = app
-                                .buttons_mut()
-                                .iter_mut()
-                                .filter_map(|button| {
-                                    if button.handle_release(cursor_x, cursor_y, window_height) {
-                                        Some(button.id())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            let img_clicked_ids: Vec<_> = app
-                                .button_images_mut()
-                                .iter_mut()
-                                .filter_map(|button| {
-                                    if button.handle_release(cursor_x, cursor_y, window_height) {
-                                        Some(button.id())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            clicked_ids.extend(img_clicked_ids);
-                            for id in clicked_ids {
-                                app.on_event(GhostEvent::ButtonClicked(id));
-                            }
-                            main_window.request_redraw();
-                        }
-                    }
-
-                    WindowEvent::Resized(size) => {
-                        main_window.handle_resize(size.width, size.height);
-                        app.on_event(GhostEvent::Resized(size.width, size.height));
-                    }
-
-                    WindowEvent::Moved(position) => {
-                        // Update callout window position to follow main window
-                        callout_window.set_position(
-                            position.x + scaled_callout_offset[0],
-                            position.y + scaled_callout_offset[1],
-                        );
-                        app.on_event(GhostEvent::Moved(position.x, position.y));
-                    }
-
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-
-                    _ => {}
-                }
-            }
-
-            Event::WindowEvent { window_id, event, .. } if window_id == callout_window_id => {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    _ => {}
-                }
-            }
-
-            Event::MainEventsCleared => {
-                let now = Instant::now();
-                let delta = now.duration_since(last_frame).as_secs_f32();
-                last_frame = now;
-
-                app.update(delta);
-                app.on_event(GhostEvent::Update(delta));
-                callout_app.update(delta);
-
-                // Update marquee labels
-                for marquee in app.marquee_labels_mut() {
-                    marquee.update(delta);
-                }
-
-                // Check if app wants to quit
-                if app.should_quit() {
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
-
-                main_window.request_redraw();
-                callout_window.request_redraw();
-            }
-
-            Event::RedrawRequested(window_id) if window_id == main_window_id => {
-                let window_size = main_window.window().inner_size();
-
-                // Initialize GPU resources if needed
-                if !main_gpu_initialized {
-                    if let Some(ref renderer) = main_window.renderer {
-                        widget_renderer = Some(crate::renderer::WidgetRenderer::new(
-                            renderer.device(),
-                            renderer.queue(),
-                            renderer.format(),
-                        ));
-                        for btn_img in app.button_images_mut() {
-                            btn_img.init_gpu(renderer.device(), renderer.queue());
-                        }
-                        app.init_gpu(GpuResources {
-                            device: renderer.device(),
-                            queue: renderer.queue(),
-                            format: renderer.format(),
-                        });
-                        main_gpu_initialized = true;
-                    }
-                }
-
-                // Prepare and render main window
-                let viewport = [window_size.width as f32, window_size.height as f32];
-                let mut marquee_widths = Vec::new();
-                if let (Some(ref mut wid_renderer), Some(ref renderer)) =
-                    (&mut widget_renderer, &main_window.renderer)
-                {
-                    let scale_factor = main_window.window().scale_factor() as f32;
-                    let buttons: Vec<&crate::elements::Button> = app.buttons();
-                    let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
-                    let labels: Vec<&crate::elements::Label> = app.labels();
-                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
-                    marquee_widths = wid_renderer.prepare(
-                        renderer.device(),
-                        renderer.queue(),
-                        &buttons,
-                        &button_images,
-                        &labels,
-                        &marquees,
-                        viewport,
-                        scale_factor,
-                    );
-                }
-                if !marquee_widths.is_empty() {
-                    let mut marquees_mut = app.marquee_labels_mut();
-                    for (idx, width) in marquee_widths {
-                        if let Some(m) = marquees_mut.get_mut(idx) {
-                            m.set_text_width(width);
-                        }
-                    }
-                }
-
-                if let Some(ref renderer) = main_window.renderer {
-                    let scale_factor = main_window.window().scale_factor() as f32;
-                    let opacity = main_window.opacity();
-                    app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, opacity);
-                }
-
-                let _ = main_window.render_with_widgets_and_app(widget_renderer.as_ref(), &mut app);
-            }
-
-            Event::RedrawRequested(window_id) if window_id == callout_window_id => {
-                let window_size = callout_window.window().inner_size();
-
-                // Initialize GPU resources if needed
-                if !callout_gpu_initialized {
-                    if let Some(ref renderer) = callout_window.renderer {
-                        callout_app.init_gpu(
-                            renderer.device(),
-                            renderer.queue(),
-                            renderer.format(),
-                        );
-                        callout_gpu_initialized = true;
-                    }
-                }
-
-                // Prepare callout (always full opacity)
-                if let Some(ref renderer) = callout_window.renderer {
-                    let viewport = [window_size.width as f32, window_size.height as f32];
-                    let scale_factor = callout_window.window().scale_factor() as f32;
-                    callout_app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, 1.0);
-                }
-
-                // Render callout window
-                let _ = callout_window.render_callout(&callout_app);
-            }
-
-            _ => (),
-        }
-    });
 }
 
 /// Trait for extra windows that can be managed by the event loop
@@ -1308,346 +734,6 @@ pub trait ExtraWindow {
     fn set_position(&self, x: i32, y: i32);
     /// Bring window to front (when main window is focused)
     fn bring_to_front(&self);
-}
-
-/// Run the ghost window with a linked callout window and optional extra window (like chat).
-///
-/// The callout window follows the main window, positioned at the given offset.
-/// The extra window manages its own snap/follow logic via GhostState.
-pub fn run_with_app_callout_and_extra<A, C, E>(
-    mut main_window: GhostWindow,
-    mut callout_window: GhostWindow,
-    callout_offset: [i32; 2],
-    event_loop: EventLoop<()>,
-    mut app: A,
-    mut callout_app: C,
-    mut extra_window: Option<E>,
-) where
-    A: GhostApp + 'static,
-    C: CalloutApp + 'static,
-    E: ExtraWindow + 'static,
-{
-    use std::time::Instant;
-
-    let main_window_id = main_window.window().id();
-    let callout_window_id = callout_window.window().id();
-    let extra_window_id = extra_window.as_ref().map(|e| e.window_id());
-
-    let mut last_frame = Instant::now();
-    let mut widget_renderer: Option<crate::renderer::WidgetRenderer> = None;
-    let mut main_gpu_initialized = false;
-    let mut callout_gpu_initialized = false;
-
-    // Get scale factor for converting logical to physical offsets
-    let scale_factor = main_window.window().scale_factor();
-    let scaled_callout_offset = [
-        (callout_offset[0] as f64 * scale_factor) as i32,
-        (callout_offset[1] as f64 * scale_factor) as i32,
-    ];
-
-    log::debug!(
-        "Scale factor: {}, callout_offset: {:?} -> {:?}",
-        scale_factor, callout_offset, scaled_callout_offset
-    );
-
-    // Position callout window initially
-    if let Some((x, y)) = main_window.outer_position() {
-        callout_window.set_position(x + scaled_callout_offset[0], y + scaled_callout_offset[1]);
-    }
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-
-        match event {
-            Event::WindowEvent { window_id, event, .. } if window_id == main_window_id => {
-                let window_size = main_window.window().inner_size();
-                let window_height = window_size.height as f32;
-
-                match event {
-                    WindowEvent::Focused(focused) => {
-                        main_window.handle_focus(focused);
-                        app.on_event(GhostEvent::FocusChanged(focused));
-                        main_window.request_redraw();
-
-                        // Bring extra window to front when main window is focused
-                        if focused {
-                            if let Some(ref extra) = extra_window {
-                                extra.bring_to_front();
-                            }
-                        }
-                    }
-
-                    WindowEvent::CursorMoved { position, .. } => {
-                        main_window.handle_cursor_moved(position);
-                        let cursor_x = position.x as f32;
-                        let cursor_y = position.y as f32;
-                        for button in app.buttons_mut() {
-                            button.update_hover(cursor_x, cursor_y, window_height);
-                        }
-                        for button_image in app.button_images_mut() {
-                            button_image.update_hover(cursor_x, cursor_y, window_height);
-                        }
-                        main_window.request_redraw();
-                    }
-
-                    WindowEvent::CursorLeft { .. } => {
-                        main_window.handle_cursor_left();
-                        for button in app.buttons_mut() {
-                            button.update_hover(-1.0, -1.0, window_height);
-                        }
-                        for button_image in app.button_images_mut() {
-                            button_image.update_hover(-1.0, -1.0, window_height);
-                        }
-                    }
-
-                    WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        if let Some(cursor_pos) = main_window.cursor_position() {
-                            let cursor_x = cursor_pos.x as f32;
-                            let cursor_y = cursor_pos.y as f32;
-                            let mut button_pressed = false;
-                            for button in app.buttons_mut() {
-                                if button.handle_press(cursor_x, cursor_y, window_height) {
-                                    button_pressed = true;
-                                    break;
-                                }
-                            }
-                            if !button_pressed {
-                                for button_image in app.button_images_mut() {
-                                    if button_image.handle_press(cursor_x, cursor_y, window_height) {
-                                        button_pressed = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if !button_pressed && main_window.should_handle_click() && main_window.is_draggable() {
-                                main_window.drag();
-                            }
-                            main_window.request_redraw();
-                        }
-                    }
-
-                    WindowEvent::MouseInput {
-                        state: ElementState::Released,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        if let Some(cursor_pos) = main_window.cursor_position() {
-                            let cursor_x = cursor_pos.x as f32;
-                            let cursor_y = cursor_pos.y as f32;
-                            let mut clicked_ids: Vec<_> = app
-                                .buttons_mut()
-                                .iter_mut()
-                                .filter_map(|button| {
-                                    if button.handle_release(cursor_x, cursor_y, window_height) {
-                                        Some(button.id())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            let img_clicked_ids: Vec<_> = app
-                                .button_images_mut()
-                                .iter_mut()
-                                .filter_map(|button| {
-                                    if button.handle_release(cursor_x, cursor_y, window_height) {
-                                        Some(button.id())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            clicked_ids.extend(img_clicked_ids);
-                            for id in clicked_ids {
-                                app.on_event(GhostEvent::ButtonClicked(id));
-                            }
-                            main_window.request_redraw();
-                        }
-                    }
-
-                    WindowEvent::Resized(size) => {
-                        main_window.handle_resize(size.width, size.height);
-                        app.on_event(GhostEvent::Resized(size.width, size.height));
-                    }
-
-                    WindowEvent::Moved(position) => {
-                        // Callout always follows main window
-                        callout_window.set_position(
-                            position.x + scaled_callout_offset[0],
-                            position.y + scaled_callout_offset[1],
-                        );
-                        app.on_event(GhostEvent::Moved(position.x, position.y));
-                    }
-
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-
-                    _ => {}
-                }
-            }
-
-            Event::WindowEvent { window_id, event, .. } if window_id == callout_window_id => {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    _ => {}
-                }
-            }
-
-            Event::WindowEvent { window_id, event, .. } if Some(window_id) == extra_window_id => {
-                if let Some(ref mut extra) = extra_window {
-                    extra.on_event(&event);
-                    extra.request_redraw();
-                }
-            }
-
-            Event::MainEventsCleared => {
-                let now = Instant::now();
-                let delta = now.duration_since(last_frame).as_secs_f32();
-
-                let target_fps = app.current_skin()
-                    .map(|_| 24.0)
-                    .unwrap_or(10.0);
-                let min_frame_time = 1.0 / target_fps;
-
-                last_frame = now;
-
-                app.update(delta);
-                app.on_event(GhostEvent::Update(delta));
-                let callout_changed = callout_app.update(delta);
-
-                // Update marquee label animations
-                for marquee in app.marquee_labels_mut() {
-                    marquee.update(delta);
-                }
-
-                // Update extra window
-                if let Some(ref mut extra) = extra_window {
-                    extra.update(delta);
-                }
-
-                if app.should_quit() {
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
-
-                if app.current_skin().is_some() {
-                    main_window.request_redraw();
-                }
-
-                if callout_changed {
-                    callout_window.request_redraw();
-                }
-
-                if let Some(ref extra) = extra_window {
-                    if extra.is_visible() {
-                        extra.request_redraw();
-                    }
-                }
-
-                *control_flow = ControlFlow::WaitUntil(
-                    now + std::time::Duration::from_secs_f32(min_frame_time)
-                );
-            }
-
-            Event::RedrawRequested(window_id) if window_id == main_window_id => {
-                let window_size = main_window.window().inner_size();
-
-                if !main_gpu_initialized {
-                    if let Some(ref renderer) = main_window.renderer {
-                        widget_renderer = Some(crate::renderer::WidgetRenderer::new(
-                            renderer.device(),
-                            renderer.queue(),
-                            renderer.format(),
-                        ));
-                        for btn_img in app.button_images_mut() {
-                            btn_img.init_gpu(renderer.device(), renderer.queue());
-                        }
-                        app.init_gpu(GpuResources {
-                            device: renderer.device(),
-                            queue: renderer.queue(),
-                            format: renderer.format(),
-                        });
-                        main_gpu_initialized = true;
-                    }
-                }
-
-                let viewport = [window_size.width as f32, window_size.height as f32];
-                let mut marquee_widths = Vec::new();
-                if let (Some(ref mut wid_renderer), Some(ref renderer)) =
-                    (&mut widget_renderer, &main_window.renderer)
-                {
-                    let scale_factor = main_window.window().scale_factor() as f32;
-                    let buttons: Vec<&crate::elements::Button> = app.buttons();
-                    let button_images: Vec<&crate::elements::ButtonImage> = app.button_images();
-                    let labels: Vec<&crate::elements::Label> = app.labels();
-                    let marquees: Vec<&crate::elements::MarqueeLabel> = app.marquee_labels();
-                    marquee_widths = wid_renderer.prepare(
-                        renderer.device(),
-                        renderer.queue(),
-                        &buttons,
-                        &button_images,
-                        &labels,
-                        &marquees,
-                        viewport,
-                        scale_factor,
-                    );
-                }
-                if !marquee_widths.is_empty() {
-                    let mut marquees_mut = app.marquee_labels_mut();
-                    for (idx, width) in marquee_widths {
-                        if let Some(m) = marquees_mut.get_mut(idx) {
-                            m.set_text_width(width);
-                        }
-                    }
-                }
-
-                if let Some(ref renderer) = main_window.renderer {
-                    let scale_factor = main_window.window().scale_factor() as f32;
-                    let opacity = main_window.opacity();
-                    app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, opacity);
-                }
-
-                let _ = main_window.render_with_widgets_and_app(widget_renderer.as_ref(), &mut app);
-            }
-
-            Event::RedrawRequested(window_id) if window_id == callout_window_id => {
-                let window_size = callout_window.window().inner_size();
-
-                if !callout_gpu_initialized {
-                    if let Some(ref renderer) = callout_window.renderer {
-                        callout_app.init_gpu(
-                            renderer.device(),
-                            renderer.queue(),
-                            renderer.format(),
-                        );
-                        callout_gpu_initialized = true;
-                    }
-                }
-
-                if let Some(ref renderer) = callout_window.renderer {
-                    let viewport = [window_size.width as f32, window_size.height as f32];
-                    let scale_factor = callout_window.window().scale_factor() as f32;
-                    callout_app.prepare(renderer.device(), renderer.queue(), viewport, scale_factor, 1.0);
-                }
-
-                let _ = callout_window.render_callout(&callout_app);
-            }
-
-            Event::RedrawRequested(window_id) if Some(window_id) == extra_window_id => {
-                if let Some(ref mut extra) = extra_window {
-                    extra.render();
-                }
-            }
-
-            _ => (),
-        }
-    });
 }
 
 /// Builder for creating GhostWindow with a fluent API.
