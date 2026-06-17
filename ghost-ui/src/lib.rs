@@ -53,7 +53,7 @@ pub use skin::{skin, skin_bytes, Skin, SkinData, SkinError};
 pub use animated_skin::{AnimatedSkin, Animation, AnimationState, PersonaMeta, PlayMode};
 
 // Renderer
-pub use renderer::{ButtonRenderer, Renderer, RendererError, SpritePipeline, WidgetRenderer};
+pub use renderer::{Renderer, RendererError, SpritePipeline, WidgetRenderer};
 
 // Layer system
 pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer, TextAlign, TextVAlign};

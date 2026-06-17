@@ -55,23 +55,28 @@ pub struct LogTheme {
 /// to add toml fields later.
 fn ui_design(_config: &LogConfig) -> LogTheme {
     LogTheme {
-        bg_color: egui::Color32::from_rgb(24, 24, 32),
+        bg_color: egui::Color32::from_rgb(255, 24, 32),
         input_panel_bg: egui::Color32::from_rgb(30, 30, 46),
+
         widget_inactive_bg: egui::Color32::from_rgb(55, 55, 70),
         widget_hovered_bg: egui::Color32::from_rgb(65, 65, 80),
         widget_active_bg: egui::Color32::from_rgb(59, 130, 246),
+
         user_bubble_bg: egui::Color32::from_rgb(59, 130, 246),
         assistant_bubble_bg: egui::Color32::from_rgb(55, 65, 81),
         bubble_text_color: egui::Color32::WHITE,
         bubble_rounding: 12.0,
         bubble_padding: egui::Margin::symmetric(12.0, 8.0),
         bubble_max_width_ratio: 0.8,
+
         role_label_color: egui::Color32::from_rgb(140, 140, 160),
         role_label_size: 11.0,
         message_spacing: 12.0,
+
         input_text_color: egui::Color32::WHITE,
         input_hint: "Type a message...".to_string(),
         input_panel_margin: egui::Margin::symmetric(12.0, 10.0),
+
         send_btn_color: egui::Color32::from_rgb(59, 130, 246),
         send_btn_text_color: egui::Color32::WHITE,
         send_btn_rounding: 8.0,
@@ -259,14 +264,10 @@ impl LogWindow {
     }
 
     /// Get the window ID for event routing
-    pub fn window_id(&self) -> WindowId {
-        self.window.id()
-    }
+    pub fn window_id(&self) -> WindowId { self.window.id() }
 
     /// Check if the window is visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
+    pub fn is_visible(&self) -> bool { self.visible }
 
     /// Show the window
     pub fn show(&mut self) {
@@ -284,11 +285,8 @@ impl LogWindow {
 
     /// Toggle window visibility
     pub fn toggle(&mut self) {
-        if self.visible {
-            self.hide();
-        } else {
-            self.show();
-        }
+        if self.visible { self.hide(); } 
+        else { self.show(); }
     }
 
     /// Add a message to the Log
@@ -298,10 +296,7 @@ impl LogWindow {
     }
 
     /// Set the window position (in physical pixels)
-    pub fn set_position(&self, x: i32, y: i32) {
-        self.window
-            .set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
-    }
+    pub fn set_position(&self, x: i32, y: i32) { self.window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y)); }
 
     /// Bring window to front (without stealing focus)
     pub fn bring_to_front(&self) {
@@ -540,21 +535,15 @@ impl LogWindow {
 
     /// Request a redraw
     pub fn request_redraw(&self) {
-        if self.visible {
-            self.window.request_redraw();
-        }
+        if self.visible { self.window.request_redraw(); }
     }
 
     /// Check if repaint is needed
-    pub fn needs_repaint(&self) -> bool {
-        self.needs_repaint && self.visible
-    }
+    pub fn needs_repaint(&self) -> bool { self.needs_repaint && self.visible }
 
     /// Render the Log window
     pub fn render(&mut self) {
-        if !self.visible {
-            return;
-        }
+        if !self.visible { return; }
 
         self.needs_repaint = false;
 
@@ -575,8 +564,7 @@ impl LogWindow {
             }
         };
 
-        let view = output
-            .texture
+        let view = output.texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         // Begin egui frame with time info for cursor blinking
@@ -938,51 +926,15 @@ impl LogWindow {
 
 }
 
-/// Split "Hearing you  ##........" into ("Hearing you", 0.2).
-/// The double-space separator is what the brain uses between label and bar.
-fn parse_voice_status(s: &str) -> (&str, f32) {
-    if let Some(idx) = s.find("  ") {
-        let label = s[..idx].trim();
-        let bar = &s[idx + 2..];
-        let hash_count = bar.chars().filter(|&c| c == '#').count();
-        let level = (hash_count as f32 / 10.0).clamp(0.0, 1.0);
-        (label, level)
-    } else {
-        (s.trim(), 0.0)
-    }
-}
 
 /// Implement ExtraWindow trait for integration with ghost-ui event loop
 impl ExtraWindow for LogWindow {
-    fn window_id(&self) -> WindowId {
-        self.window.id()
-    }
-
-    fn on_event(&mut self, event: &WindowEvent) {
-        LogWindow::on_event(self, event);
-    }
-
-    fn update(&mut self, delta: f32) {
-        self.update_state(delta);
-    }
-
-    fn render(&mut self) {
-        LogWindow::render(self);
-    }
-
-    fn request_redraw(&self) {
-        LogWindow::request_redraw(self);
-    }
-
-    fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    fn set_position(&self, x: i32, y: i32) {
-        LogWindow::set_position(self, x, y);
-    }
-
-    fn bring_to_front(&self) {
-        LogWindow::bring_to_front(self);
-    }
+    fn window_id(&self) -> WindowId { self.window.id() }
+    fn on_event(&mut self, event: &WindowEvent) { LogWindow::on_event(self, event); }
+    fn update(&mut self, delta: f32) { self.update_state(delta); }
+    fn render(&mut self) { LogWindow::render(self); }
+    fn request_redraw(&self) { LogWindow::request_redraw(self); }
+    fn is_visible(&self) -> bool { self.visible }
+    fn set_position(&self, x: i32, y: i32) { LogWindow::set_position(self, x, y); }
+    fn bring_to_front(&self) { LogWindow::bring_to_front(self); }
 }

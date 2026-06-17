@@ -22,20 +22,14 @@ pub enum ControlWindowCommand {
 pub type ControlSender = Sender<ControlWindowCommand>;
 pub type ControlReceiver = Receiver<ControlWindowCommand>;
 
-pub fn create_control_channel() -> (ControlSender, ControlReceiver) {
-    channel()
-}
+pub fn create_control_channel() -> (ControlSender, ControlReceiver) { channel() }
 
 /// Minimal GhostApp for the control window.
 /// The skin (quad_arrow.png) is loaded onto the GhostWindow itself.
-pub struct ControlApp {
-    callout_tx: CalloutSender,
-}
+pub struct ControlApp { callout_tx: CalloutSender, }
 
 impl ControlApp {
-    pub fn new(callout_tx: CalloutSender) -> Self {
-        Self { callout_tx }
-    }
+    pub fn new(callout_tx: CalloutSender) -> Self { Self { callout_tx } }
 
     fn send(&self, cmd: CalloutCommand) {
         if let Err(e) = self.callout_tx.send(cmd) {
@@ -212,24 +206,19 @@ impl ExtraWindow for ControlWindow {
                 ControlWindowCommand::Toggle => self.toggle(),
             }
         }
-        if self.visible {
-            self.app.update(delta);
-        }
+        if self.visible { self.app.update(delta); }
     }
 
     fn render(&mut self) {
-        if !self.visible {
-            return;
-        }
+        if !self.visible { return; }
 
         // Lazy GPU init on first render
         if !self.gpu_initialized {
             if let Some(wr) = self.window.init_app_gpu(&mut self.app) {
                 self.widget_renderer = Some(wr);
                 self.gpu_initialized = true;
-            } else {
-                return;
-            }
+            } 
+            else { return; }
         }
 
         let size = self.window.window().inner_size();
@@ -239,18 +228,12 @@ impl ExtraWindow for ControlWindow {
     }
 
     fn request_redraw(&self) {
-        if self.visible {
-            self.window.request_redraw();
-        }
+        if self.visible { self.window.request_redraw(); }
     }
 
-    fn is_visible(&self) -> bool {
-        self.visible
-    }
+    fn is_visible(&self) -> bool { self.visible }
 
-    fn set_position(&self, x: i32, y: i32) {
-        self.window.set_position(x, y);
-    }
+    fn set_position(&self, x: i32, y: i32) { self.window.set_position(x, y); }
 
     fn bring_to_front(&self) {
         if self.visible {

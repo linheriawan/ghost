@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use ghost_ui::{
     AnimatedSkin, AnimationState, Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor,
     LayerConfig, LayerRenderer, PersonaMeta, Skin, SkinData, SpritePipeline, TextAlign, TextVAlign,
+    ButtonStyle,
 };
 use wgpu::TextureFormat;
 
@@ -13,7 +14,6 @@ use crate::config::Config;
 use crate::skin::SkinBundle;
 use crate::ui;
 use crate::vars::GhostState;
-
 /// Skin loading state for lazy loading from .persona.zip
 enum SkinLoadState {
     /// Background thread is loading animation frames
@@ -37,7 +37,7 @@ struct MainUiDesign {
 /// Main application state
 pub struct App {
     config: Config,
-    buttons: Vec<Button>,
+    button_list: Vec<Button>,
     callout_sender: CalloutSender,
     skin_size: (u32, u32),
     layers: Vec<Layer>,
@@ -71,41 +71,18 @@ fn ui_design(
     persona_meta: Option<&PersonaMeta>,
     load_state_is_loading: bool,
 ) -> MainUiDesign {
-    // Create buttons from config
-    let buttons = ui::create_buttons_from_config(&config.buttons);
+    // Buttons are defined in code; ui.toml can override position/size/style per id.
+    let buttons = vec![
+        ui::make_btn("greet",  "Greet",  [10.0,  10.0], [60.0, 28.0], ButtonStyle::primary(), config),
+        ui::make_btn("think",  "Think",  [80.0,  10.0], [60.0, 28.0], ButtonStyle::default(), config),
+        ui::make_btn("scream", "Scream", [150.0, 10.0], [60.0, 28.0], ButtonStyle::light(),   config),
+        ui::make_btn("hello",  "Hello",  [100.0, 200.0],[60.0, 30.0], ButtonStyle::primary(), config),
+    ];
 
     // Load layers from config
-    let mut layers = Vec::new();
-
-    for layer_config in &config.layers {
-        let ghost_config = LayerConfig {
-            anchor: LayerAnchor::from_str(&layer_config.anchor),
-            offset: layer_config.offset,
-            size: layer_config.size,
-            text: layer_config.text.clone(),
-            text_color: layer_config.text_color,
-            font_size: layer_config.font_size,
-            z_order: layer_config.z_order,
-            text_align: TextAlign::from_str(&layer_config.text_align),
-            text_valign: TextVAlign::from_str(&layer_config.text_valign),
-            text_offset: layer_config.text_offset,
-            text_padding: layer_config.text_padding,
-        };
-        match Layer::from_path(&layer_config.path, ghost_config) {
-            Ok(mut layer) => {
-                layer.calculate_position(skin_width, skin_height);
-                log::info!(
-                    "Loaded layer: {} at position {:?}",
-                    layer_config.path,
-                    layer.position()
-                );
-                layers.push(layer);
-            }
-            Err(e) => {
-                log::error!("Failed to load layer '{}': {}", layer_config.path, e);
-            }
-        }
-    }
+    let mut layers: Vec<Layer> = config.layers.iter()
+        .filter_map(|cfg| ui::make_layer(cfg, skin_width, skin_height))
+        .collect();
 
     // Sort layers by z_order
     layers.sort_by_key(|l| l.config.z_order);
@@ -167,7 +144,7 @@ fn ui_design(
     } else {
         (None, None)
     };
-
+    
     MainUiDesign {
         buttons,
         layers,
@@ -203,7 +180,7 @@ impl App {
 
         Self {
             config,
-            buttons: design.buttons,
+            button_list: design.buttons,
             callout_sender,
             skin_size: (skin.width, skin.height),
             layers: design.layers,
@@ -314,49 +291,25 @@ impl GhostApp for App {
 
     fn target_fps(&self) -> f32 {
         if self.animated_skin.is_some() || matches!(self.load_state, SkinLoadState::Loading { .. })
-        {
-            self.config.skin.fps
-        } else {
-            30.0
-        }
+        { self.config.skin.fps } 
+        else { 30.0 }
     }
 
     fn on_event(&mut self, event: GhostEvent) {
         match event {
             GhostEvent::ButtonClicked(id) => {
-                // Find which button was clicked by ID
-                for btn_config in &self.config.buttons {
-                    if ui::get_button_id(&btn_config.id) == id {
-                        // Send command to callout window based on button ID
-                        match btn_config.id.as_str() {
-                            "greet" => {
-                                self.send_callout(CalloutCommand::Say(
-                                    "Hi, how are you today?".to_string(),
-                                ));
-                                log::info!("Action: Greeting");
-                            }
-                            "think" => {
-                                self.send_callout(CalloutCommand::Think(
-                                    "Hmm, let me think about that...".to_string(),
-                                ));
-                                log::info!("Action: Thinking");
-                            }
-                            "scream" => {
-                                self.send_callout(CalloutCommand::Scream(
-                                    "WATCH OUT!".to_string(),
-                                ));
-                                log::info!("Action: Screaming");
-                            }
-                            _ => {
-                                self.send_callout(CalloutCommand::Say(format!(
-                                    "Button '{}' clicked!",
-                                    btn_config.id
-                                )));
-                                log::info!("Action: Unknown button '{}'", btn_config.id);
-                            }
-                        }
-                        break;
-                    }
+                if id == ui::get_button_id("greet") {
+                    self.send_callout(CalloutCommand::Say("Hi, how are you today?".to_string()));
+                    log::info!("Action: Greeting");
+                } else if id == ui::get_button_id("think") {
+                    self.send_callout(CalloutCommand::Think("Hmm, let me think about that...".to_string()));
+                    log::info!("Action: Thinking");
+                } else if id == ui::get_button_id("scream") {
+                    self.send_callout(CalloutCommand::Scream("WATCH OUT!".to_string()));
+                    log::info!("Action: Screaming");
+                } else if id == ui::get_button_id("hello") {
+                    self.send_callout(CalloutCommand::Say("Hello world!".to_string()));
+                    log::info!("Action: Hello");
                 }
             }
             GhostEvent::Resized(width, height) => {
@@ -375,13 +328,9 @@ impl GhostApp for App {
         }
     }
 
-    fn buttons(&self) -> Vec<&Button> {
-        self.buttons.iter().collect()
-    }
+    fn buttons(&self) -> Vec<&Button> { self.button_list.iter().collect() }
 
-    fn buttons_mut(&mut self) -> Vec<&mut Button> {
-        self.buttons.iter_mut().collect()
-    }
+    fn buttons_mut(&mut self) -> Vec<&mut Button> { self.button_list.iter_mut().collect() }
 
     fn prepare(
         &mut self,

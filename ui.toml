@@ -20,6 +20,22 @@ animated = false
 # Frames per second for animation playback
 fps = 24
 
+# Layer overlays - images rendered on top of the main skin
+[[layers]]
+path = "assets/name_plate.png"
+anchor = "bottom-center"  # Where to position relative to skin
+offset = [0.0, 0.0]       # Offset from anchor [x, y]
+size = [288.0, 60.0]
+text = "{name}"
+text_color = [0.2, 0.2, 0.2, 1.0]  # RGBA
+font_size = 24.0
+z_order = 0               # Higher values render on top
+# Text positioning options (relative to layer):
+text_align = "center"     # "left", "center", "right"
+text_valign = "center"    # "top", "center", "bottom"
+text_offset = [0.0, -2.0]  # Additional offset from calculated position [x, y]
+text_padding = [8.0, 8.0, 8.0, 8.0]  # Padding [left, right, top, bottom]
+
 [callout]
 # Anchor point relative to skin: "top-left", "top-center", "top-right",
 #                                 "center-left", "center-center", "center-right",
@@ -111,18 +127,3 @@ tts_lang      = "a"   # "a"=en-us, "b"=en-gb, "id"=Bahasa Indonesia, etc.
 stt_encoder = "models/stt/whisper-multi/encoder_model.onnx"
 stt_decoder = "models/stt/whisper-multi/decoder_model_merged.onnx"
 
-# Layer overlays - images rendered on top of the main skin
-[[layers]]
-path = "assets/name_plate.png"
-anchor = "bottom-center"  # Where to position relative to skin
-offset = [0.0, 0.0]       # Offset from anchor [x, y]
-size = [288.0, 60.0]
-text = "{name}"
-text_color = [0.2, 0.2, 0.2, 1.0]  # RGBA
-font_size = 24.0
-z_order = 0               # Higher values render on top
-# Text positioning options (relative to layer):
-text_align = "center"     # "left", "center", "right"
-text_valign = "center"    # "top", "center", "bottom"
-text_offset = [0.0, -2.0]  # Additional offset from calculated position [x, y]
-text_padding = [8.0, 8.0, 8.0, 8.0]  # Padding [left, right, top, bottom]
