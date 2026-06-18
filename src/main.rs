@@ -35,9 +35,12 @@ fn main() {
     let tray_components = tray::setup_tray("assets/icon.png");
 
     // --- 5. LOAD SKIN ---
+
     let skin_bundle = skin::load(&config.skin);
     let (skin_width, skin_height) = (skin_bundle.width, skin_bundle.height);
     let assistant_name = skin_bundle.persona.as_ref().map(|m| m.nick.clone());
+
+    println!("\x1b[1;105;34m ASSISTANT {:?} \x1b[0m", &assistant_name );
 
     // --- 6. EXTRA WINDOWS ---
     let chat_size = [config.chat.size[0], skin_height];
@@ -48,7 +51,7 @@ fn main() {
     );
     let log_win = windows::log_window::LogWindow::new(
         &event_loop, bus.log_rx, None, chat_size,
-        assistant_name, ghost_state.clone(), &config.chat,
+        assistant_name.clone(), ghost_state.clone(), &config.chat,
     );
     let ctrl_win = windows::control_window::ControlWindow::new(
         &event_loop, bus.ctrl_rx, bus.callout_tx.clone(),
@@ -86,10 +89,12 @@ fn main() {
 
     if let Some(monitor) = main_window.window().current_monitor() {
         let mon = monitor.size();
+        dbg!(&mon);
         let win = main_window.window().outer_size();
+        dbg!(&win);
         let (x, y) = config.window.calculate_position(mon.width, mon.height, win.width, win.height);
         main_window.set_position(x, y);
-        log::info!("Main window at ({}, {}) [{}]", x, y, config.window.position);
+        println!("Main window at ({}, {}) [{}]", &x, &y, &config.window.position);
     }
 
     // --- 9. APPS ---

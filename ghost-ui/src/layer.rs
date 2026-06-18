@@ -6,10 +6,13 @@ use glyphon::{
 };
 use wgpu::{BindGroup, Device, MultisampleState, Queue, RenderPass, TextureFormat};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{Skin, SkinData, SkinError, SpritePipeline};
 
 /// Text alignment options
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TextAlign {
     Left,
     #[default]
@@ -32,7 +35,8 @@ impl TextAlign {
 }
 
 /// Vertical alignment options
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TextVAlign {
     Top,
     #[default]
@@ -55,7 +59,8 @@ impl TextVAlign {
 }
 
 /// Position anchor for layers
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LayerAnchor {
     TopLeft,
     TopCenter,
@@ -105,9 +110,13 @@ impl LayerAnchor {
 }
 
 /// Configuration for a layer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerConfig {
+    /// Path to the image file
+    #[serde(default)]
+    pub path: String,
     /// Anchor point relative to parent skin
+    #[serde(default = "LayerConfig::default_anchor")]
     pub anchor: LayerAnchor,
     /// Offset from anchor in pixels [x, y]
     pub offset: [f32; 2],
@@ -132,10 +141,15 @@ pub struct LayerConfig {
     pub text_padding: [f32; 4],
 }
 
+impl LayerConfig {
+    fn default_anchor() -> LayerAnchor { LayerAnchor::BottomLeft }
+}
+
 impl Default for LayerConfig {
     fn default() -> Self {
         Self {
-            anchor: LayerAnchor::BottomCenter,
+            path: String::new(),
+            anchor: LayerAnchor::BottomLeft,
             offset: [0.0, 0.0],
             size: None,
             text: None,
@@ -201,15 +215,14 @@ impl Layer {
     pub fn calculate_position(&mut self, parent_width: u32, parent_height: u32) {
         let (anchor_x, anchor_y) = self.config.anchor.as_fraction();
 
-        // Calculate anchor point on parent
         let anchor_px = parent_width as f32 * anchor_x;
         let anchor_py = parent_height as f32 * anchor_y;
 
-        // Center the layer on the anchor point
-        let layer_width = self.skin_data.width() as f32;
-        let layer_height = self.skin_data.height() as f32;
+        let (layer_width, layer_height) = match self.config.size {
+            Some([w, h]) => (w, h),
+            None => (self.skin_data.width() as f32, self.skin_data.height() as f32),
+        };
 
-        // Position so layer is centered on anchor
         let x = anchor_px - (layer_width * anchor_x) + self.config.offset[0];
         let y = anchor_py - (layer_height * anchor_y) + self.config.offset[1];
 

@@ -1,15 +1,17 @@
 # GHOST APP
 ## main-app
-┌─────────────────────────────┐
-│ base layer                  │
-│    ┌───────────┐   ┌───┐    │
-│    │   Skin    │   | b |    │
-│    │           │   └───┘    │
-│    │    ┌───────────┐       │
-│    └────│  Layer ┌───┐      │
-|         |        | a |      |
-|         └────────└───┘      |
-└─────────────────────────────┘
+```
+┌─────────────────────────────┐  
+│ base layer                  │  
+│    ┌───────────┐   ┌───┐    │  
+│    │   Skin    │   | b |    │  
+│    │           │   └───┘    │  
+│    │    ┌───────────┐       │  
+│    └────│  Layer ┌───┐      │  
+|         |        | a |      |  
+|         └────────└───┘      |  
+└─────────────────────────────┘  
+```
 
 - Base Layer will be container for rendering the UI on a transparent window. 
 - skin is behind-most layer of stil image or a frame sequence animation.
@@ -19,18 +21,19 @@
 - on window lost focus transparency should be applied to components as a whole (layer cant see-through skin)
 
 ## chat-window
-┌────────────────────────────┐┌────────────────────────────┐
-│                            ││ [][][] Chat-window Title   │
-│                            │├────────────────────────────┘
-│                            ││┌─────────────────────────┐ │
-│                            │││ chat bubble area        │ │
-│       main window          │││                         │ │
-│  (the transparent window)  ││└─────────────────────────┘ │
-│                            ││┌─────────────┐ ┌────────┐  │
-│                            │││ input text  │ │ button │  │
-│                            ││└─────────────┘ └────────┘  │
-└────────────────────────────┘└────────────────────────────┘
-
+```
+┌────────────────────────────┐┌────────────────────────────┐  
+│                            ││ [][][] Chat-window Title   │  
+│                            │├────────────────────────────┘  
+│                            ││┌─────────────────────────┐ │  
+│                            │││ chat bubble area        │ │  
+│       main window          │││                         │ │  
+│  (the transparent window)  ││└─────────────────────────┘ │  
+│                            ││┌─────────────┐ ┌────────┐  │  
+│                            │││ input text  │ │ button │  │  
+│                            ││└─────────────┘ └────────┘  │  
+└────────────────────────────┘└────────────────────────────┘  
+```
 ## windows
 
 ### main-window
@@ -105,5 +108,3 @@ callout.think("Hmm...");
 callout.scream("WATCH OUT!");
 callout.update(delta_time);
 ```
-
-

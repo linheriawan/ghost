@@ -5,10 +5,11 @@
 
 use ghost_ui::{
     Button, ButtonId, ButtonImage, ButtonStyle, Label, LabelId, LabelStyle,
-    Layer, LayerAnchor, LayerConfig, MarqueeLabel, Origin, TextAlign, TextVAlign,
+    Layer, LayerConfig, MarqueeLabel, Origin,
 };
 
-use crate::config::{Config, LayerConfig as CfgLayer};
+use crate::config::Config;
+use crate::vars::GhostState;
 
 fn name_hash(name: &str) -> u32 {
     name.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32))
@@ -49,23 +50,11 @@ pub fn make_btn(
 }
 
 /// Build a Layer from a config entry; logs and returns None on load failure.
-pub fn make_layer(cfg: &CfgLayer, skin_width: u32, skin_height: u32) -> Option<Layer> {
-    let ghost_cfg = LayerConfig {
-        anchor:      LayerAnchor::from_str(&cfg.anchor),
-        offset:      cfg.offset,
-        size:        cfg.size,
-        text:        cfg.text.clone(),
-        text_color:  cfg.text_color,
-        font_size:   cfg.font_size,
-        z_order:     cfg.z_order,
-        text_align:  TextAlign::from_str(&cfg.text_align),
-        text_valign: TextVAlign::from_str(&cfg.text_valign),
-        text_offset: cfg.text_offset,
-        text_padding:cfg.text_padding,
-    };
-    match Layer::from_path(&cfg.path, ghost_cfg) {
+pub fn make_layer(cfg: &LayerConfig, state: &GhostState) -> Option<Layer> {
+    let (w, h) = state.skin_size();
+    match Layer::from_path(&cfg.path, cfg.clone()) {
         Ok(mut layer) => {
-            layer.calculate_position(skin_width, skin_height);
+            layer.calculate_position(w, h);
             log::info!("Loaded layer: {} at {:?}", cfg.path, layer.position());
             Some(layer)
         }

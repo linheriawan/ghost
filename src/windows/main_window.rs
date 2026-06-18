@@ -39,7 +39,6 @@ pub struct App {
     config: Config,
     button_list: Vec<Button>,
     callout_sender: CalloutSender,
-    skin_size: (u32, u32),
     layers: Vec<Layer>,
     layer_renderer: LayerRenderer,
     layer_pipeline: Option<SpritePipeline>,
@@ -66,8 +65,7 @@ pub struct App {
 /// This makes visual modifications easier: only look at this one function.
 fn ui_design(
     config: &Config,
-    skin_width: u32,
-    skin_height: u32,
+    state: &GhostState,
     persona_meta: Option<&PersonaMeta>,
     load_state_is_loading: bool,
 ) -> MainUiDesign {
@@ -81,28 +79,23 @@ fn ui_design(
 
     // Load layers from config
     let mut layers: Vec<Layer> = config.layers.iter()
-        .filter_map(|cfg| ui::make_layer(cfg, skin_width, skin_height))
+        .filter_map(|cfg| ui::make_layer(cfg, state))
         .collect();
-
+    if let Ok(mut tl) = Layer::from_path("assets/icon.png", LayerConfig::default()) {
+        let (w, h) = state.skin_size();
+        tl.calculate_position(w, h);
+        layers.push(tl);
+    }
     // Sort layers by z_order
     layers.sort_by_key(|l| l.config.z_order);
 
     // Substitute persona placeholders in layer text ({name}, {nick})
+
     if let Some(meta) = persona_meta {
         for layer in &mut layers {
             if let Some(ref mut text) = layer.config.text {
                 if text.contains("{name}") || text.contains("{nick}") {
                     *text = text.replace("{name}", &meta.name).replace("{nick}", &meta.nick);
-                }
-            }
-        }
-    } else {
-        let name_path = config.skin.path.clone();
-        let name_part = name_path.split('.').next().unwrap().split('/').last().unwrap();
-        for layer in &mut layers {
-            if let Some(ref mut text) = layer.config.text {
-                if text.contains("{name}") || text.contains("{nick}") {
-                    *text = text.replace("{name}", name_part).replace("{nick}", name_part);
                 }
             }
         }
@@ -114,21 +107,16 @@ fn ui_design(
 
         let loading_layer = if load_state_is_loading {
             // Create a semi-transparent background bar centered on the character
+            let (skin_width, skin_height) = state.skin_size();
             let bar_width = skin_width.min(300);
             let bar_height = 40u32;
             if let Ok(bg_data) = SkinData::solid_color(bar_width, bar_height, [0, 0, 0, 180]) {
                 let layer_config = LayerConfig {
                     anchor: LayerAnchor::Center,
-                    offset: [0.0, 0.0],
-                    size: None,
                     text: Some(meta.loading_text.clone()),
-                    text_color: [1.0, 1.0, 1.0, 1.0],
                     font_size: 14.0,
                     z_order: 100,
-                    text_align: TextAlign::Center,
-                    text_valign: TextVAlign::Center,
-                    text_offset: [0.0, 0.0],
-                    text_padding: [8.0, 8.0, 8.0, 8.0],
+                    ..LayerConfig::default()
                 };
                 let mut layer = Layer::new(bg_data, layer_config);
                 layer.calculate_position(skin_width, skin_height);
@@ -144,7 +132,7 @@ fn ui_design(
     } else {
         (None, None)
     };
-    
+
     MainUiDesign {
         buttons,
         layers,
@@ -170,10 +158,10 @@ impl App {
 
         let load_state_is_loading = matches!(load_state, SkinLoadState::Loading { .. });
 
+        state.set_skin_size(skin.width, skin.height);
         let design = ui_design(
             &config,
-            skin.width,
-            skin.height,
+            &state,
             skin.persona.as_ref(),
             load_state_is_loading,
         );
@@ -182,7 +170,6 @@ impl App {
             config,
             button_list: design.buttons,
             callout_sender,
-            skin_size: (skin.width, skin.height),
             layers: design.layers,
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
@@ -291,7 +278,7 @@ impl GhostApp for App {
 
     fn target_fps(&self) -> f32 {
         if self.animated_skin.is_some() || matches!(self.load_state, SkinLoadState::Loading { .. })
-        { self.config.skin.fps } 
+        { self.config.skin.fps }
         else { 30.0 }
     }
 

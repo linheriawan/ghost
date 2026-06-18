@@ -6,8 +6,6 @@ edition = "2021"
 [workspace]
 members = ["ghost-ui", "gassetsmaker"]
 
-
-
 [dependencies]
 ghost-ui = { path = "./ghost-ui" }
 wgpu = "0.19"

@@ -47,6 +47,7 @@ pub enum PlayMode {
 }
 
 /// A single animation (sequence of frames)
+#[derive(Debug)]
 pub struct Animation {
     /// Frame data (loaded from disk)
     frames: Vec<SkinData>,
@@ -263,6 +264,7 @@ impl AnimationState {
 }
 
 /// Animated skin with multiple animation states
+#[derive(Debug)]
 pub struct AnimatedSkin {
     /// Map of animation states to animations
     animations: HashMap<AnimationState, Animation>,

@@ -7,6 +7,7 @@ use ghost_ui::{skin, AnimatedSkin, PersonaMeta, SkinData};
 use crate::config::SkinConfig;
 
 /// Everything that comes out of loading a skin from config.
+#[derive(Debug)]
 pub struct SkinBundle {
     pub width: u32,
     pub height: u32,
@@ -22,6 +23,7 @@ pub struct SkinBundle {
 
 /// Load a skin from config. Handles zip, animated directory, and static image.
 pub fn load(config: &SkinConfig) -> SkinBundle {
+    let assistant = config.path.split('.').next().unwrap().split('/').last().unwrap().to_string();
     if config.path.ends_with(".zip") {
         let meta = AnimatedSkin::load_meta_from_zip(&config.path).unwrap_or_else(|e| {
             log::error!("Failed to load persona meta '{}': {}", config.path, e);
@@ -62,11 +64,18 @@ pub fn load(config: &SkinConfig) -> SkinBundle {
         });
         let dims = animated.dimensions().unwrap_or((200, 200));
         log::info!("Loaded animated skin: {}x{} at {}fps", dims.0, dims.1, config.fps);
+
+        let meta = PersonaMeta {
+            name: assistant.clone(),
+            nick: assistant.clone(),
+            still_image: None,
+            loading_text: format!("Waiting for `{}` to prepare", &assistant),
+        };
         SkinBundle {
             width: dims.0,
             height: dims.1,
             animated: Some(animated),
-            persona: None,
+            persona: Some(meta),
             load_rx: None,
             static_data: None,
         }
@@ -76,11 +85,17 @@ pub fn load(config: &SkinConfig) -> SkinBundle {
             panic!("Could not load skin image");
         });
         let (w, h) = (data.width(), data.height());
+        let meta = PersonaMeta {
+            name: assistant.clone(),
+            nick: assistant.clone(),
+            still_image: None,
+            loading_text: format!("Waiting for `{}` to prepare", &assistant),
+        };
         SkinBundle {
             width: w,
             height: h,
             animated: None,
-            persona: None,
+            persona: Some(meta),
             load_rx: None,
             static_data: Some(data),
         }

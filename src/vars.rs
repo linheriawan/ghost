@@ -54,6 +54,7 @@ struct Inner {
     pub log_window: WindowState,
     pub control_window: WindowState,
     pub snap_config: SnapConfig,
+    pub skin_size: (u32, u32),
 }
 
 // -- GhostState (thread-safe shared handle) --
@@ -117,6 +118,7 @@ impl GhostState {
             snap_config: SnapConfig {
                 scaled_extra_offset: [0, 0],
             },
+            skin_size: (0, 0),
         })))
     }
 
@@ -160,6 +162,14 @@ impl GhostState {
         let mut inner = self.0.write();
         inner.main_window.rect.width = w;
         inner.main_window.rect.height = h;
+    }
+
+    pub fn skin_size(&self) -> (u32, u32) {
+        self.0.read().skin_size
+    }
+
+    pub fn set_skin_size(&self, w: u32, h: u32) {
+        self.0.write().skin_size = (w, h);
     }
 
     pub fn set_main_state(&self, state: WinState) {
