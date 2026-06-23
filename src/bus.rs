@@ -7,10 +7,20 @@ use crate::windows::chat_window::{create_chat_channel, ChatReceiver, ChatSender}
 use crate::windows::control_window::{create_control_channel, ControlReceiver, ControlSender};
 use crate::windows::log_window::{create_Log_channel, LogReceiver, LogSender};
 
+/// Clonable sender-only view of AppBus. Pass to components that only need to send.
+#[derive(Clone)]
+pub struct AppSenders {
+    pub chat_tx: ChatSender,
+    pub callout_tx: CalloutSender,
+    pub log_tx: LogSender,
+    pub ctrl_tx: ControlSender,
+    pub brain_tx: Option<Sender<BrainCommand>>,
+}
+
 /// All inter-component channel endpoints, created once and distributed to windows.
 ///
-/// Senders (Sender<T>) can be freely cloned.
-/// Receivers must be consumed by exactly one window.
+/// Senders can be cloned freely via `senders()`.
+/// Receivers are `Option<T>` — each window takes its own via `take()`.
 pub struct AppBus {
     // -- senders --
     pub chat_tx: ChatSender,
@@ -19,11 +29,11 @@ pub struct AppBus {
     pub ctrl_tx: ControlSender,
     pub brain_tx: Option<Sender<BrainCommand>>,
 
-    // -- receivers (each moved into exactly one window) --
-    pub chat_rx: ChatReceiver,
-    pub callout_rx: Receiver<CalloutCommand>,
-    pub log_rx: LogReceiver,
-    pub ctrl_rx: ControlReceiver,
+    // -- receivers (consumed by exactly one window via take()) --
+    pub chat_rx: Option<ChatReceiver>,
+    pub callout_rx: Option<Receiver<CalloutCommand>>,
+    pub log_rx: Option<LogReceiver>,
+    pub ctrl_rx: Option<ControlReceiver>,
     pub brain_rx: Option<Receiver<BrainResponse>>,
 }
 
@@ -51,11 +61,22 @@ impl AppBus {
             log_tx,
             ctrl_tx,
             brain_tx,
-            chat_rx,
-            callout_rx,
-            log_rx,
-            ctrl_rx,
+            chat_rx: Some(chat_rx),
+            callout_rx: Some(callout_rx),
+            log_rx: Some(log_rx),
+            ctrl_rx: Some(ctrl_rx),
             brain_rx,
+        }
+    }
+
+    /// Clone all senders into a standalone, clonable struct.
+    pub fn senders(&self) -> AppSenders {
+        AppSenders {
+            chat_tx: self.chat_tx.clone(),
+            callout_tx: self.callout_tx.clone(),
+            log_tx: self.log_tx.clone(),
+            ctrl_tx: self.ctrl_tx.clone(),
+            brain_tx: self.brain_tx.clone(),
         }
     }
 }

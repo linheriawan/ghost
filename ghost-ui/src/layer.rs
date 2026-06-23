@@ -214,10 +214,10 @@ impl Layer {
     /// Calculate the layer position based on parent skin dimensions
     pub fn calculate_position(&mut self, parent_width: u32, parent_height: u32) {
         let (anchor_x, anchor_y) = self.config.anchor.as_fraction();
-
+        println!("\x1b[1;105;34m ANC: {:?} \x1b[0m", &self.config.anchor  );
         let anchor_px = parent_width as f32 * anchor_x;
         let anchor_py = parent_height as f32 * anchor_y;
-
+        println!("\x1b[1;105;34m ANC x: {} y: {} px: {} py: {} \x1b[0m", &anchor_x, &anchor_y, &anchor_px, &anchor_py,  );
         let (layer_width, layer_height) = match self.config.size {
             Some([w, h]) => (w, h),
             None => (self.skin_data.width() as f32, self.skin_data.height() as f32),
@@ -225,7 +225,8 @@ impl Layer {
 
         let x = anchor_px - (layer_width * anchor_x) + self.config.offset[0];
         let y = anchor_py - (layer_height * anchor_y) + self.config.offset[1];
-
+        println!("\x1b[1;105;34m W: {} H: {} \x1b[0m", &parent_width,&parent_height );
+        println!("\x1b[1;105;34m x: {} y: {} \x1b[0m", &x,&y );
         self.position = [x, y];
     }
 
@@ -242,6 +243,16 @@ impl Layer {
     /// Get layer dimensions
     pub fn dimensions(&self) -> (u32, u32) {
         self.skin_data.dimensions()
+    }
+
+    /// Return true if (x, y) in window-space pixels falls within this layer's bounding rect.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let [lx, ly] = self.position;
+        let (w, h) = match self.config.size {
+            Some([sw, sh]) => (sw, sh),
+            None => { let (dw, dh) = self.skin_data.dimensions(); (dw as f32, dh as f32) }
+        };
+        x >= lx && x < lx + w && y >= ly && y < ly + h
     }
 
     /// Get the text to render (if any)

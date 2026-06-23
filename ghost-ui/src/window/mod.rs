@@ -255,18 +255,12 @@ impl GhostWindow {
         if self.data.config.focus_opacity_enabled {
             self.update_opacity_for_focus();
         }
-
-        // When unfocused, disable click-through so user can click to focus
-        // When focused, re-enable alpha-based click-through
+        // Re-evaluate click-through based on current cursor position regardless of focus.
+        // Transparent areas stay pass-through even when unfocused; only opaque areas
+        // can receive the click that refocuses the window.
         if self.data.config.alpha_hit_test && !self.data.config.click_through {
-            if !focused {
-                // Unfocused: always accept clicks so user can focus the window
-                self.update_click_through(false);
-            } else {
-                // Focused: re-evaluate based on current cursor position
-                let is_transparent = !self.hit_test_at_cursor();
-                self.update_click_through(is_transparent);
-            }
+            let is_transparent = !self.hit_test_at_cursor();
+            self.update_click_through(is_transparent);
         }
     }
 
@@ -282,20 +276,27 @@ impl GhostWindow {
     /// Handle cursor movement.
     pub fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
         self.data.cursor_position = Some(position);
-
-        // Only apply alpha-based click-through when focused
-        // When unfocused, we want all clicks to reach the window so it can be focused
-        if self.data.config.alpha_hit_test && !self.data.config.click_through && self.data.is_focused {
+        // Note: click-through is updated here for skin-only hit testing.
+        // If the app has layers on top of transparent skin areas, call
+        // apply_hit_test(hit) after this to include them.
+        if self.data.config.alpha_hit_test && !self.data.config.click_through {
             let is_transparent = !self.hit_test_at_cursor();
             self.update_click_through(is_transparent);
+        }
+    }
+
+    /// Override the click-through decision after handle_cursor_moved.
+    /// Pass true if the cursor is over any opaque content (skin or layers).
+    pub fn apply_hit_test(&self, hit: bool) {
+        if self.data.config.alpha_hit_test && !self.data.config.click_through {
+            self.update_click_through(!hit);
         }
     }
 
     /// Handle cursor leaving the window.
     pub fn handle_cursor_left(&mut self) {
         self.data.cursor_position = None;
-        // Re-enable click handling when cursor leaves (only matters when focused)
-        if self.data.config.alpha_hit_test && !self.data.config.click_through && self.data.is_focused {
+        if self.data.config.alpha_hit_test && !self.data.config.click_through {
             self.update_click_through(false);
         }
     }
@@ -312,6 +313,17 @@ impl GhostWindow {
 
         // Windows and Linux don't have easy per-pixel click-through,
         // so we handle it in the event loop instead
+    }
+
+    /// Test if a point (in window physical pixels) is over a non-transparent skin pixel.
+    pub fn hit_test_skin(&self, x: f32, y: f32) -> bool {
+        let Some(ref skin) = self.data.skin else { return true };
+        let Some((orig_w, orig_h)) = self.data.original_skin_size else { return true };
+        let (win_w, win_h) = self.data.last_size;
+        if win_w == 0 || win_h == 0 { return false; }
+        let scale_x = orig_w as f64 / win_w as f64;
+        let scale_y = orig_h as f64 / win_h as f64;
+        skin.hit_test((x as f64 * scale_x) as f32, (y as f64 * scale_y) as f32, self.data.config.alpha_threshold)
     }
 
     /// Test if the cursor is over a non-transparent pixel.
@@ -620,6 +632,12 @@ pub trait GhostApp {
     /// scale_factor is the display's DPI scale (1.0 for standard, 2.0 for Retina)
     /// opacity is the current window opacity (0.0 to 1.0)
     fn prepare(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _viewport: [f32; 2], _scale_factor: f32, _opacity: f32) {}
+
+    /// Return true if the given window-space point (physical pixels) is over
+    /// any app-owned opaque content (layers, UI elements) that isn't part of
+    /// the skin. The runner calls this after the skin hit test so layers are
+    /// included in click-through decisions.
+    fn hit_test(&self, _x: f32, _y: f32) -> bool { false }
 
     /// Called during rendering to render layers and text overlays
     /// This is called after the main skin is rendered but before buttons

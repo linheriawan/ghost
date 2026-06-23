@@ -10,6 +10,7 @@ use tao::event_loop::EventLoop;
 use tao::window::WindowId;
 
 use super::callout_window::{CalloutCommand, CalloutSender};
+use crate::bus::AppBus;
 
 /// Commands to show or hide the control window
 #[derive(Debug)]
@@ -56,11 +57,9 @@ pub struct ControlWindow {
 }
 
 impl ControlWindow {
-    pub fn new(
-        event_loop: &EventLoop<()>,
-        receiver: ControlReceiver,
-        callout_tx: CalloutSender,
-    ) -> Self {
+    pub fn new(event_loop: &EventLoop<()>, bus: &mut AppBus) -> Self {
+        let receiver = bus.ctrl_rx.take().expect("ctrl_rx already consumed");
+        let callout_tx = bus.callout_tx.clone();
         let skin_data = skin("assets/quad_arrow.png").unwrap_or_else(|e| {
             log::error!("Failed to load control skin: {}", e);
             panic!("Could not load assets/quad_arrow.png");

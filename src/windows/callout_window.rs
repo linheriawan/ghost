@@ -6,6 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 use wgpu::{Device, Queue, RenderPass, TextureFormat};
 
+use crate::bus::AppBus;
 use crate::config::{Anchor, Config};
 
 /// Commands that can be sent to the callout window
@@ -28,7 +29,8 @@ pub struct CalloutWindowApp {
 }
 
 impl CalloutWindowApp {
-    pub fn new(config: &Config, receiver: Receiver<CalloutCommand>) -> Self {
+    pub fn new(config: &Config, bus: &mut AppBus) -> Self {
+        let receiver = bus.callout_rx.take().expect("callout_rx already consumed");
         let callout = ui_design(config);
         Self {
             callout,

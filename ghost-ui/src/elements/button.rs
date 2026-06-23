@@ -198,7 +198,7 @@ impl Button {
     }
 
     /// Check if a point (in screen coordinates) is inside the button
-    fn contains_point(&self, screen_x: f32, screen_y: f32, window_height: f32) -> bool {
+    pub fn contains_point(&self, screen_x: f32, screen_y: f32, window_height: f32) -> bool {
         if !self.visible {
             return false;
         }

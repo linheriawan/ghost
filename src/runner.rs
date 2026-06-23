@@ -49,6 +49,15 @@ pub fn run<A, C>(
                 match event {
                     WindowEvent::Focused(focused) => {
                         main_window.handle_focus(focused);
+                        // handle_focus runs the skin hit test; also check layers and buttons.
+                        if let Some(pos) = main_window.cursor_position() {
+                            let (cx, cy) = (pos.x as f32, pos.y as f32);
+                            let app_hit = app.hit_test(cx, cy)
+                                || app.buttons().iter().any(|b| b.contains_point(cx, cy, window_height));
+                            if app_hit {
+                                main_window.apply_hit_test(true);
+                            }
+                        }
                         app.on_event(GhostEvent::FocusChanged(focused));
                         main_window.request_redraw();
                         if focused {
@@ -56,9 +65,22 @@ pub fn run<A, C>(
                         }
                     }
 
+                    WindowEvent::CursorEntered { .. } => {
+                        // Cursor entered: optimistically re-enable click detection so
+                        // the next CursorMoved can do a precise hit test.
+                        main_window.apply_hit_test(true);
+                    }
+
                     WindowEvent::CursorMoved { position, .. } => {
                         main_window.handle_cursor_moved(position);
                         let (cx, cy) = (position.x as f32, position.y as f32);
+                        // Include app layers and buttons in the hit test.
+                        // Buttons and layers may sit over transparent skin pixels.
+                        let app_hit = app.hit_test(cx, cy)
+                            || app.buttons().iter().any(|b| b.contains_point(cx, cy, window_height));
+                        if app_hit {
+                            main_window.apply_hit_test(true);
+                        }
                         for btn in app.buttons_mut() { btn.update_hover(cx, cy, window_height); }
                         for img in app.button_images_mut() { img.update_hover(cx, cy, window_height); }
                         main_window.request_redraw();

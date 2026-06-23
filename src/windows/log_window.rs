@@ -14,6 +14,7 @@ use tao::event_loop::EventLoop;
 use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
+use crate::bus::AppBus;
 use crate::config::LogConfig;
 use crate::vars::GhostState;
 
@@ -150,13 +151,14 @@ impl LogWindow {
     /// Create a new Log window (starts hidden)
     pub fn new(
         event_loop: &EventLoop<()>,
-        receiver: LogReceiver,
-        on_send: Option<Sender<String>>,
+        bus: &mut AppBus,
         size: [u32; 2],
         assistant_name: Option<String>,
         state: GhostState,
         Log_config: &LogConfig,
     ) -> Self {
+        let receiver = bus.log_rx.take().expect("log_rx already consumed");
+        let on_send: Option<Sender<String>> = None;
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
             .with_inner_size(LogicalSize::new(size[0], size[1]))

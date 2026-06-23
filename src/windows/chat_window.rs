@@ -15,6 +15,7 @@ use tao::window::{Window, WindowBuilder, WindowId};
 use wgpu::{Device, Queue, Surface, SurfaceConfiguration};
 
 use crate::brain::{BrainCommand, BrainResponse};
+use crate::bus::AppBus;
 use crate::config::ChatConfig;
 use crate::vars::GhostState;
 
@@ -152,15 +153,16 @@ impl ChatWindow {
     /// Create a new chat window (starts hidden)
     pub fn new(
         event_loop: &EventLoop<()>,
-        receiver: ChatReceiver,
-        on_send: Option<Sender<String>>,
+        bus: &mut AppBus,
         size: [u32; 2],
         assistant_name: Option<String>,
         state: GhostState,
         chat_config: &ChatConfig,
-        brain_tx: Option<Sender<BrainCommand>>,
-        brain_rx: Option<Receiver<BrainResponse>>,
     ) -> Self {
+        let receiver = bus.chat_rx.take().expect("chat_rx already consumed");
+        let brain_tx = bus.brain_tx.clone();
+        let brain_rx = bus.brain_rx.take();
+        let on_send: Option<Sender<String>> = None;
         // Create the window (hidden initially, no decorations for precise positioning)
         let window = WindowBuilder::new()
             .with_inner_size(LogicalSize::new(size[0], size[1]))

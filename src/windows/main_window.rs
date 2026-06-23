@@ -9,11 +9,13 @@ use ghost_ui::{
 };
 use wgpu::TextureFormat;
 
-use super::callout_window::{CalloutCommand, CalloutSender};
+use super::callout_window::CalloutCommand;
+use crate::bus::AppSenders;
 use crate::config::Config;
 use crate::skin::SkinBundle;
 use crate::ui;
 use crate::vars::GhostState;
+use crate::windows::control_window::ControlWindowCommand;
 /// Skin loading state for lazy loading from .persona.zip
 enum SkinLoadState {
     /// Background thread is loading animation frames
@@ -38,13 +40,13 @@ struct MainUiDesign {
 pub struct App {
     config: Config,
     button_list: Vec<Button>,
-    callout_sender: CalloutSender,
+    bus: AppSenders,
     layers: Vec<Layer>,
     layer_renderer: LayerRenderer,
     layer_pipeline: Option<SpritePipeline>,
     texture_format: Option<TextureFormat>,
     /// Animated skin (if using frame sequences)
-    animated_skin: Option<AnimatedSkin>,
+    pub animated_skin: Option<AnimatedSkin>,
     /// Lazy loading state
     load_state: SkinLoadState,
     /// Still image skin displayed during loading
@@ -74,17 +76,26 @@ fn ui_design(
         ui::make_btn("greet",  "Greet",  [10.0,  10.0], [60.0, 28.0], ButtonStyle::primary(), config),
         ui::make_btn("think",  "Think",  [80.0,  10.0], [60.0, 28.0], ButtonStyle::default(), config),
         ui::make_btn("scream", "Scream", [150.0, 10.0], [60.0, 28.0], ButtonStyle::light(),   config),
-        ui::make_btn("hello",  "Hello",  [100.0, 200.0],[60.0, 30.0], ButtonStyle::primary(), config),
+        ui::make_btn("ctrl",  "Control",  [100.0, 200.0],[60.0, 30.0], ButtonStyle::primary(), config),
     ];
 
     // Load layers from config
     let mut layers: Vec<Layer> = config.layers.iter()
         .filter_map(|cfg| ui::make_layer(cfg, state))
         .collect();
-    if let Ok(mut tl) = Layer::from_path("assets/icon.png", LayerConfig::default()) {
+    if let Ok(mut bl) = Layer::from_path("assets/bl.png", LayerConfig::default()) {
         let (w, h) = state.skin_size();
-        tl.calculate_position(w, h);
-        layers.push(tl);
+        bl.calculate_position(w, h);
+        layers.push(bl);
+    }
+
+    if let Ok(mut tr) = Layer::from_path("assets/tr.png", LayerConfig{
+        anchor: LayerAnchor::TopRight,
+        ..LayerConfig::default()
+    }) {
+        let (w, h) = state.skin_size();
+        tr.calculate_position(w, h);
+        layers.push(tr);
     }
     // Sort layers by z_order
     layers.sort_by_key(|l| l.config.z_order);
@@ -145,7 +156,7 @@ impl App {
     pub fn new(
         config: Config,
         skin: SkinBundle,
-        callout_sender: CalloutSender,
+        bus: AppSenders,
         state: GhostState,
     ) -> Self {
         let load_state = if let Some(receiver) = skin.load_rx {
@@ -169,7 +180,7 @@ impl App {
         Self {
             config,
             button_list: design.buttons,
-            callout_sender,
+            bus,
             layers: design.layers,
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
@@ -181,26 +192,6 @@ impl App {
             needs_gpu_reinit: false,
             loading_layer: design.loading_layer,
             state,
-        }
-    }
-
-    /// Send a callout command
-    fn send_callout(&self, cmd: CalloutCommand) {
-        if let Err(e) = self.callout_sender.send(cmd) {
-            log::error!("Failed to send callout command: {}", e);
-        }
-    }
-
-    /// Set animation state by name
-    pub fn set_animation_state(&mut self, state_name: &str) {
-        if let Some(ref mut animated_skin) = self.animated_skin {
-            let state = AnimationState::from_str(state_name);
-            if animated_skin.has_state(state) {
-                animated_skin.set_state(state);
-                log::info!("Animation state changed to: {:?}", state);
-            } else {
-                log::warn!("Animation state not available: {}", state_name);
-            }
         }
     }
 
@@ -286,17 +277,17 @@ impl GhostApp for App {
         match event {
             GhostEvent::ButtonClicked(id) => {
                 if id == ui::get_button_id("greet") {
-                    self.send_callout(CalloutCommand::Say("Hi, how are you today?".to_string()));
+                    let _ = self.bus.callout_tx.send(CalloutCommand::Say("Howdy.. have a nice day would you..".into()));
                     log::info!("Action: Greeting");
                 } else if id == ui::get_button_id("think") {
-                    self.send_callout(CalloutCommand::Think("Hmm, let me think about that...".to_string()));
+                    let _ = self.bus.callout_tx.send(CalloutCommand::Think("Hmm, let me think about that...".into()));
                     log::info!("Action: Thinking");
                 } else if id == ui::get_button_id("scream") {
-                    self.send_callout(CalloutCommand::Scream("WATCH OUT!".to_string()));
+                    let _ = self.bus.callout_tx.send(CalloutCommand::Scream("WATCH OUT!".into()));
                     log::info!("Action: Screaming");
-                } else if id == ui::get_button_id("hello") {
-                    self.send_callout(CalloutCommand::Say("Hello world!".to_string()));
-                    log::info!("Action: Hello");
+                } else if id == ui::get_button_id("ctrl") {
+                    let _ = self.bus.ctrl_tx.send(ControlWindowCommand::Toggle);
+                    log::info!("Action: toggle ctrl");
                 }
             }
             GhostEvent::Resized(width, height) => {
@@ -390,5 +381,9 @@ impl GhostApp for App {
 
         // Render layer text
         self.layer_renderer.render_text(render_pass);
+    }
+
+    fn hit_test(&self, x: f32, y: f32) -> bool {
+        self.layers.iter().any(|l| l.contains(x, y))
     }
 }

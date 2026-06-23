@@ -29,33 +29,27 @@ fn main() {
     let ghost_state = vars::GhostState::new();
 
     // --- 3. CHANNELS + BRAIN ---
-    let bus = bus::AppBus::create(&config);
+    let mut bus = bus::AppBus::create(&config);
 
     // --- 4. TRAY ---
     let tray_components = tray::setup_tray("assets/icon.png");
 
     // --- 5. LOAD SKIN ---
-
     let skin_bundle = skin::load(&config.skin);
     let (skin_width, skin_height) = (skin_bundle.width, skin_bundle.height);
     let assistant_name = skin_bundle.persona.as_ref().map(|m| m.nick.clone());
 
-    println!("\x1b[1;105;34m ASSISTANT {:?} \x1b[0m", &assistant_name );
+    println!("\x1b[1;105;34m ASSISTANT {:?} \x1b[0m", &assistant_name);
 
     // --- 6. EXTRA WINDOWS ---
     let chat_size = [config.chat.size[0], skin_height];
     let chat_win = windows::chat_window::ChatWindow::new(
-        &event_loop, bus.chat_rx, None, chat_size,
-        assistant_name.clone(), ghost_state.clone(), &config.chat,
-        bus.brain_tx.clone(), bus.brain_rx,
+        &event_loop, &mut bus, chat_size, assistant_name.clone(), ghost_state.clone(), &config.chat,
     );
     let log_win = windows::log_window::LogWindow::new(
-        &event_loop, bus.log_rx, None, chat_size,
-        assistant_name.clone(), ghost_state.clone(), &config.chat,
+        &event_loop, &mut bus, chat_size, assistant_name.clone(), ghost_state.clone(), &config.chat,
     );
-    let ctrl_win = windows::control_window::ControlWindow::new(
-        &event_loop, bus.ctrl_rx, bus.callout_tx.clone(),
-    );
+    let ctrl_win = windows::control_window::ControlWindow::new(&event_loop, &mut bus);
 
     // --- 7. CALLOUT WINDOW ---
     let callout_offset = windows::callout_window::calculate_callout_offset(&config, skin_width, skin_height);
@@ -98,13 +92,10 @@ fn main() {
     }
 
     // --- 9. APPS ---
-    let main_app = windows::main_window::App::new(
-        config.clone(), skin_bundle, bus.callout_tx, ghost_state.clone(),
-    );
-    let coordinator = coordinator::Coordinator::new(
-        main_app, tray_components.menu_ids, bus.chat_tx, bus.log_tx, bus.ctrl_tx,
-    );
-    let callout_window_app = windows::callout_window::CalloutWindowApp::new(&config, bus.callout_rx);
+    let app_senders = bus.senders();
+    let main_app = windows::main_window::App::new(config.clone(), skin_bundle, app_senders.clone(), ghost_state.clone());
+    let coordinator = coordinator::Coordinator::new(main_app, tray_components.menu_ids, app_senders);
+    let callout_window_app = windows::callout_window::CalloutWindowApp::new(&config, &mut bus);
 
     // --- 10. SNAP CONFIG ---
     let chat_offset = config.chat.calculate_offset_with_size(skin_width, skin_height, chat_size);
