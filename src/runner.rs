@@ -2,85 +2,62 @@
 
 use std::time::Instant;
 
-use ghost_ui::{CalloutApp, EventLoop, ExtraWindow, GhostApp, GhostEvent, GhostWindow, Widget, WidgetRenderer};
+use ghost_ui::{EventLoop, ExtraWindow, GhostApp, GhostEvent, GhostWindow, Widget, WidgetRenderer};
 use tao::event::{ElementState, Event, MouseButton, WindowEvent};
 use tao::event_loop::ControlFlow;
 
-/// Run the application event loop with a main ghost window, a linked callout window,
-/// and any number of extra windows (chat, log, controller, etc.).
-pub fn run<A, C>(
+pub fn run<A>(
     mut main_window: GhostWindow,
-    mut callout_window: GhostWindow,
-    callout_offset: [i32; 2],
     event_loop: EventLoop<()>,
     mut app: A,
-    mut callout_app: C,
-    mut extra_windows: Vec<Box<dyn ExtraWindow>>,
+    mut followers: Vec<Box<dyn ExtraWindow>>,
 ) where
     A: GhostApp + 'static,
-    C: CalloutApp + 'static,
 {
     let main_id = main_window.window().id();
-    let callout_id = callout_window.window().id();
 
     let mut last_frame = Instant::now();
     let mut widget_renderer: Option<WidgetRenderer> = None;
     let mut main_gpu_ready = false;
-    let mut callout_gpu_ready = false;
-
-    let scale_factor = main_window.window().scale_factor();
-    let scaled_callout_offset = [
-        (callout_offset[0] as f64 * scale_factor) as i32,
-        (callout_offset[1] as f64 * scale_factor) as i32,
-    ];
 
     if let Some((x, y)) = main_window.outer_position() {
-        callout_window.set_position(x + scaled_callout_offset[0], y + scaled_callout_offset[1]);
+        for f in &followers { f.on_primary_moved(x, y); }
     }
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match event {
-            // ── Main window events ────────────────────────────────────────────
+            // ── Main window ───────────────────────────────────────────────────
             Event::WindowEvent { window_id, event, .. } if window_id == main_id => {
                 let window_height = main_window.window().inner_size().height as f32;
 
                 match event {
                     WindowEvent::Focused(focused) => {
                         main_window.handle_focus(focused);
-                        // handle_focus runs the skin hit test; also check layers and buttons.
                         if let Some(pos) = main_window.cursor_position() {
                             let (cx, cy) = (pos.x as f32, pos.y as f32);
                             let app_hit = app.hit_test(cx, cy)
                                 || app.buttons().iter().any(|b| b.contains_point(cx, cy, window_height));
-                            if app_hit {
-                                main_window.apply_hit_test(true);
-                            }
+                            if app_hit { main_window.apply_hit_test(true); }
                         }
                         app.on_event(GhostEvent::FocusChanged(focused));
                         main_window.request_redraw();
                         if focused {
-                            for extra in &extra_windows { extra.bring_to_front(); }
+                            for f in &followers { f.bring_to_front(); }
                         }
                     }
 
                     WindowEvent::CursorEntered { .. } => {
-                        // Cursor entered: optimistically re-enable click detection so
-                        // the next CursorMoved can do a precise hit test.
                         main_window.apply_hit_test(true);
                     }
 
                     WindowEvent::CursorMoved { position, .. } => {
                         main_window.handle_cursor_moved(position);
                         let (cx, cy) = (position.x as f32, position.y as f32);
-                        // Include app layers and buttons in the hit test.
-                        // Buttons and layers may sit over transparent skin pixels.
                         let app_hit = app.hit_test(cx, cy)
                             || app.buttons().iter().any(|b| b.contains_point(cx, cy, window_height));
-                        if app_hit {
-                            main_window.apply_hit_test(true);
-                        }
+                        if app_hit { main_window.apply_hit_test(true); }
                         for btn in app.buttons_mut() { btn.update_hover(cx, cy, window_height); }
                         for img in app.button_images_mut() { img.update_hover(cx, cy, window_height); }
                         main_window.request_redraw();
@@ -123,10 +100,7 @@ pub fn run<A, C>(
                     }
 
                     WindowEvent::Moved(pos) => {
-                        callout_window.set_position(
-                            pos.x + scaled_callout_offset[0],
-                            pos.y + scaled_callout_offset[1],
-                        );
+                        for f in &followers { f.on_primary_moved(pos.x, pos.y); }
                         app.on_event(GhostEvent::Moved(pos.x, pos.y));
                     }
 
@@ -135,19 +109,12 @@ pub fn run<A, C>(
                 }
             }
 
-            // ── Callout window events ─────────────────────────────────────────
-            Event::WindowEvent { window_id, event, .. } if window_id == callout_id => {
-                if let WindowEvent::CloseRequested = event {
-                    *control_flow = ControlFlow::Exit;
-                }
-            }
-
-            // ── Extra windows (chat, log, controller, …) ──────────────────────
+            // ── Follower windows ──────────────────────────────────────────────
             Event::WindowEvent { window_id, event, .. } => {
-                for extra in &mut extra_windows {
-                    if extra.window_id() == window_id {
-                        extra.on_event(&event);
-                        extra.request_redraw();
+                for f in &mut followers {
+                    if f.window_id() == window_id {
+                        f.on_event(&event);
+                        f.request_redraw();
                         break;
                     }
                 }
@@ -162,15 +129,13 @@ pub fn run<A, C>(
 
                 app.update(delta);
                 app.on_event(GhostEvent::Update(delta));
-                let callout_changed = callout_app.update(delta);
                 for marquee in app.marquee_labels_mut() { marquee.update(delta); }
-                for extra in &mut extra_windows { extra.update(delta); }
+                for f in &mut followers { f.update(delta); }
 
                 if app.should_quit() { *control_flow = ControlFlow::Exit; return; }
                 if app.current_skin().is_some() { main_window.request_redraw(); }
-                if callout_changed { callout_window.request_redraw(); }
-                for extra in &extra_windows {
-                    if extra.is_visible() { extra.request_redraw(); }
+                for f in &followers {
+                    if f.is_visible() { f.request_redraw(); }
                 }
 
                 *control_flow = ControlFlow::WaitUntil(
@@ -195,23 +160,11 @@ pub fn run<A, C>(
                 let _ = main_window.render_with_widgets_and_app(widget_renderer.as_ref(), &mut app);
             }
 
-            // ── Render: callout window ────────────────────────────────────────
-            Event::RedrawRequested(window_id) if window_id == callout_id => {
-                if !callout_gpu_ready {
-                    callout_window.init_callout_gpu(&mut callout_app);
-                    callout_gpu_ready = true;
-                }
-                let size = callout_window.window().inner_size();
-                let viewport = [size.width as f32, size.height as f32];
-                callout_window.prepare_callout(&mut callout_app, viewport);
-                let _ = callout_window.render_callout(&callout_app);
-            }
-
-            // ── Render: extra windows ─────────────────────────────────────────
+            // ── Render: follower windows ──────────────────────────────────────
             Event::RedrawRequested(window_id) => {
-                for extra in &mut extra_windows {
-                    if extra.window_id() == window_id {
-                        extra.render();
+                for f in &mut followers {
+                    if f.window_id() == window_id {
+                        f.render();
                         break;
                     }
                 }

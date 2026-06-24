@@ -681,6 +681,8 @@ pub trait ExtraWindow {
     fn is_visible(&self) -> bool;
     /// Set window position (for following main window)
     fn set_position(&self, x: i32, y: i32);
+    /// Called when the primary window moves; override to follow it.
+    fn on_primary_moved(&self, _x: i32, _y: i32) {}
     /// Bring window to front (when main window is focused)
     fn bring_to_front(&self);
 }

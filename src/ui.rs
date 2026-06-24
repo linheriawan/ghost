@@ -16,14 +16,10 @@ fn name_hash(name: &str) -> u32 {
 }
 
 /// Stable ButtonId from a name string.
-pub fn get_button_id(name: &str) -> ButtonId {
-    ButtonId::new(name_hash(name))
-}
+pub fn get_button_id(name: &str) -> ButtonId { ButtonId::new(name_hash(name)) }
 
 /// Stable LabelId from a name string.
-pub fn get_label_id(name: &str) -> LabelId {
-    LabelId::new(name_hash(name))
-}
+pub fn get_label_id(name: &str) -> LabelId { LabelId::new(name_hash(name)) }
 
 /// Build a Button with code defaults; a matching config entry overrides position/size/style.
 pub fn make_btn(

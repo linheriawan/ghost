@@ -52,19 +52,7 @@ fn main() {
     let ctrl_win = windows::control_window::ControlWindow::new(&event_loop, &mut bus);
 
     // --- 7. CALLOUT WINDOW ---
-    let callout_offset = windows::callout_window::calculate_callout_offset(&config, skin_width, skin_height);
-    let callout_size = windows::callout_window::calculate_callout_size(&config);
-    let callout_window = GhostWindowBuilder::new()
-        .with_size(callout_size.0, callout_size.1)
-        .with_always_on_top(true)
-        .with_draggable(false)
-        .with_click_through(true)
-        .with_alpha_hit_test(false)
-        .with_opacity_focused(1.0)
-        .with_opacity_unfocused(1.0)
-        .with_title("Ghost Callout")
-        .build(&event_loop)
-        .expect("Failed to create callout window");
+    let callout_win = windows::callout_window::CalloutWindow::new(&config, &event_loop, &mut bus);
 
     // --- 8. MAIN GHOST WINDOW ---
     let mut window_builder = GhostWindowBuilder::new()
@@ -92,10 +80,8 @@ fn main() {
     }
 
     // --- 9. APPS ---
-    let app_senders = bus.senders();
-    let main_app = windows::main_window::App::new(config.clone(), skin_bundle, app_senders.clone(), ghost_state.clone());
-    let coordinator = coordinator::Coordinator::new(main_app, tray_components.menu_ids, app_senders);
-    let callout_window_app = windows::callout_window::CalloutWindowApp::new(&config, &mut bus);
+    let main_app = windows::main_window::App::new(config.clone(), skin_bundle, &mut bus, ghost_state.clone());
+    let coordinator = coordinator::Coordinator::new(main_app, tray_components.menu_ids, bus.senders());
 
     // --- 10. SNAP CONFIG ---
     let chat_offset = config.chat.calculate_offset_with_size(skin_width, skin_height, chat_size);
@@ -106,15 +92,15 @@ fn main() {
             (chat_offset[1] as f64 * scale_factor) as i32,
         ],
     });
-    if let Some((x, y)) = main_window.outer_position() {
-        ghost_state.set_main_pos(x, y);
-    }
+    if let Some((x, y)) = main_window.outer_position() { ghost_state.set_main_pos(x, y); }
 
     // --- 11. RUN ---
     runner::run(
-        main_window, callout_window, callout_offset, event_loop,
-        coordinator, callout_window_app,
+        main_window,
+        event_loop,
+        coordinator,
         vec![
+            Box::new(callout_win) as Box<dyn ghost_ui::ExtraWindow>,
             Box::new(chat_win) as Box<dyn ghost_ui::ExtraWindow>,
             Box::new(log_win) as Box<dyn ghost_ui::ExtraWindow>,
             Box::new(ctrl_win) as Box<dyn ghost_ui::ExtraWindow>,

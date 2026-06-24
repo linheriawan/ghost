@@ -3,19 +3,27 @@
 use std::sync::mpsc;
 
 use ghost_ui::{
-    AnimatedSkin, AnimationState, Button, GhostApp, GhostEvent, GpuResources, Layer, LayerAnchor,
-    LayerConfig, LayerRenderer, PersonaMeta, Skin, SkinData, SpritePipeline, TextAlign, TextVAlign,
-    ButtonStyle,
+    AnimatedSkin, AnimationState, Button, ButtonImage, ButtonStyle, GhostApp, GhostEvent, GpuResources, Label, Layer, LayerAnchor, LayerConfig, LayerRenderer, MarqueeLabel, PersonaMeta, Skin, SkinData, SpritePipeline, TextAlign, TextVAlign,
 };
+use rustfft::num_traits::ToPrimitive;
 use wgpu::TextureFormat;
 
 use super::callout_window::CalloutCommand;
-use crate::bus::AppSenders;
+use crate::bus::{AppBus, AppSenders};
 use crate::config::Config;
 use crate::skin::SkinBundle;
 use crate::ui;
 use crate::vars::GhostState;
 use crate::windows::control_window::ControlWindowCommand;
+
+#[derive(Debug, Clone)]
+pub enum MainCommand {
+    MicLevel(f32),
+}
+pub type MainSender = mpsc::Sender<MainCommand>;
+pub type MainReceiver = mpsc::Receiver<MainCommand>;
+pub fn create_main_channel() -> (MainSender, MainReceiver) { mpsc::channel() }
+
 /// Skin loading state for lazy loading from .persona.zip
 enum SkinLoadState {
     /// Background thread is loading animation frames
@@ -28,19 +36,33 @@ enum SkinLoadState {
     Static,
 }
 
+enum AnyWidget {
+    Button(Button),
+    ButtonImage(ButtonImage),
+    Label(Label),
+    Marquee(MarqueeLabel),
+}
+
 /// Visual output from ui_design() — the "what it looks like" for the main window
 struct MainUiDesign {
-    buttons: Vec<Button>,
+    widgets: Vec<AnyWidget>,
     layers: Vec<Layer>,
     loading_layer: Option<Layer>,
     still_skin_data: Option<SkinData>,
 }
-
+#[derive(Default)]
+struct GhostData {
+    mic_level: f32,
+    something_else: String,
+}
 /// Main application state
 pub struct App {
     config: Config,
-    button_list: Vec<Button>,
     bus: AppSenders,
+    main_rx: Option<MainReceiver>,
+    data: GhostData,
+
+    widgets: Vec<AnyWidget>,
     layers: Vec<Layer>,
     layer_renderer: LayerRenderer,
     layer_pipeline: Option<SpritePipeline>,
@@ -71,20 +93,24 @@ fn ui_design(
     persona_meta: Option<&PersonaMeta>,
     load_state_is_loading: bool,
 ) -> MainUiDesign {
-    // Buttons are defined in code; ui.toml can override position/size/style per id.
-    let buttons = vec![
-        ui::make_btn("greet",  "Greet",  [10.0,  10.0], [60.0, 28.0], ButtonStyle::primary(), config),
-        ui::make_btn("think",  "Think",  [80.0,  10.0], [60.0, 28.0], ButtonStyle::default(), config),
-        ui::make_btn("scream", "Scream", [150.0, 10.0], [60.0, 28.0], ButtonStyle::light(),   config),
-        ui::make_btn("ctrl",  "Control",  [100.0, 200.0],[60.0, 30.0], ButtonStyle::primary(), config),
+    let (w, h) = state.skin_size();
+    let mut widgets: Vec<AnyWidget> = vec![
+        AnyWidget::Button(ui::make_btn("greet",  "Greet",  [10.0,  10.0], [60.0, 28.0], ButtonStyle::primary(), config)),
+        AnyWidget::Button(ui::make_btn("think",  "Think",  [80.0,  10.0], [60.0, 28.0], ButtonStyle::default(), config)),
+        AnyWidget::Button(ui::make_btn("scream", "Scream", [150.0, 10.0], [60.0, 28.0], ButtonStyle::light(),   config)),
+        AnyWidget::Button(ui::make_btn("ctrl",  "Control", [100.0, 200.0],[60.0, 30.0], ButtonStyle::primary(), config)),
+        AnyWidget::Label(ui::make_label("status_bar", "A text in the bottom", [10.0, 60.0], [160.0, 24.0], ghost_ui::LabelStyle::with_background())),
+        AnyWidget::Marquee(ui::make_marquee("announcement", "this is a marquee scrolling text", [10.0, 90.0], [160.0, 24.0], ghost_ui::LabelStyle::with_background(), 30.0)),
     ];
-
+    if let Some(img) = ui::make_btn_image("win_close", "assets/icon.png", [10.0, 120.0]) {
+        widgets.push(AnyWidget::ButtonImage(img));
+    }
     // Load layers from config
     let mut layers: Vec<Layer> = config.layers.iter()
         .filter_map(|cfg| ui::make_layer(cfg, state))
         .collect();
+
     if let Ok(mut bl) = Layer::from_path("assets/bl.png", LayerConfig::default()) {
-        let (w, h) = state.skin_size();
         bl.calculate_position(w, h);
         layers.push(bl);
     }
@@ -93,7 +119,6 @@ fn ui_design(
         anchor: LayerAnchor::TopRight,
         ..LayerConfig::default()
     }) {
-        let (w, h) = state.skin_size();
         tr.calculate_position(w, h);
         layers.push(tr);
     }
@@ -101,7 +126,6 @@ fn ui_design(
     layers.sort_by_key(|l| l.config.z_order);
 
     // Substitute persona placeholders in layer text ({name}, {nick})
-
     if let Some(meta) = persona_meta {
         for layer in &mut layers {
             if let Some(ref mut text) = layer.config.text {
@@ -144,21 +168,18 @@ fn ui_design(
         (None, None)
     };
 
-    MainUiDesign {
-        buttons,
-        layers,
-        loading_layer,
-        still_skin_data,
-    }
+    MainUiDesign { widgets, layers, loading_layer, still_skin_data }
 }
 
 impl App {
     pub fn new(
         config: Config,
         skin: SkinBundle,
-        bus: AppSenders,
+        bus: &mut AppBus,
         state: GhostState,
     ) -> Self {
+        let main_rx = bus.main_rx.take();
+        let bus = bus.senders();
         let load_state = if let Some(receiver) = skin.load_rx {
             SkinLoadState::Loading { receiver }
         } else if skin.animated.is_some() {
@@ -179,8 +200,11 @@ impl App {
 
         Self {
             config,
-            button_list: design.buttons,
             bus,
+            main_rx,
+            data: GhostData::default(),
+
+            widgets: design.widgets,
             layers: design.layers,
             layer_renderer: LayerRenderer::new(),
             layer_pipeline: None,
@@ -240,6 +264,13 @@ impl GhostApp for App {
     }
 
     fn update(&mut self, delta: f32) {
+        if let Some(ref rx) = self.main_rx {
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    MainCommand::MicLevel(level) => self.data.mic_level = level,
+                }
+            }
+        }
         // Check for completed background load
         if let SkinLoadState::Loading { ref receiver } = self.load_state {
             if let Ok(loaded_skin) = receiver.try_recv() {
@@ -306,9 +337,27 @@ impl GhostApp for App {
         }
     }
 
-    fn buttons(&self) -> Vec<&Button> { self.button_list.iter().collect() }
-
-    fn buttons_mut(&mut self) -> Vec<&mut Button> { self.button_list.iter_mut().collect() }
+    fn buttons(&self) -> Vec<&Button> {
+        self.widgets.iter().filter_map(|w| if let AnyWidget::Button(b) = w { Some(b) } else { None }).collect()
+    }
+    fn buttons_mut(&mut self) -> Vec<&mut Button> {
+        self.widgets.iter_mut().filter_map(|w| if let AnyWidget::Button(b) = w { Some(b) } else { None }).collect()
+    }
+    fn button_images(&self) -> Vec<&ButtonImage> {
+        self.widgets.iter().filter_map(|w| if let AnyWidget::ButtonImage(b) = w { Some(b) } else { None }).collect()
+    }
+    fn button_images_mut(&mut self) -> Vec<&mut ButtonImage> {
+        self.widgets.iter_mut().filter_map(|w| if let AnyWidget::ButtonImage(b) = w { Some(b) } else { None }).collect()
+    }
+    fn labels(&self) -> Vec<&Label> {
+        self.widgets.iter().filter_map(|w| if let AnyWidget::Label(l) = w { Some(l) } else { None }).collect()
+    }
+    fn marquee_labels(&self) -> Vec<&MarqueeLabel> {
+        self.widgets.iter().filter_map(|w| if let AnyWidget::Marquee(m) = w { Some(m) } else { None }).collect()
+    }
+    fn marquee_labels_mut(&mut self) -> Vec<&mut MarqueeLabel> {
+        self.widgets.iter_mut().filter_map(|w| if let AnyWidget::Marquee(m) = w { Some(m) } else { None }).collect()
+    }
 
     fn prepare(
         &mut self,

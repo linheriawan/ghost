@@ -1,15 +1,15 @@
-//! Callout window application - renders the callout bubble in a separate window
+//! Callout window — self-contained window that renders the callout bubble.
 
-use ghost_ui::{Callout, CalloutStyle, TextAnimation};
-use ghost_ui::CalloutApp;
+use ghost_ui::{Callout, CalloutApp, CalloutStyle, ExtraWindow, GhostWindowBuilder, TextAnimation};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
+use tao::event::WindowEvent;
+use tao::window::WindowId;
 use wgpu::{Device, Queue, RenderPass, TextureFormat};
 
 use crate::bus::AppBus;
 use crate::config::{Anchor, Config};
 
-/// Commands that can be sent to the callout window
 #[derive(Debug, Clone)]
 pub enum CalloutCommand {
     Say(String),
@@ -18,46 +18,96 @@ pub enum CalloutCommand {
     Hide,
 }
 
-/// Sender for callout commands - used by main app
 pub type CalloutSender = Sender<CalloutCommand>;
 
-/// Callout window app - renders the callout in a separate window
-pub struct CalloutWindowApp {
+pub struct CalloutWindow {
+    window: ghost_ui::GhostWindow,
+    offset: [i32; 2],
+    logic: CalloutLogic,
+}
+
+impl CalloutWindow {
+    pub fn new(config: &Config, event_loop: &ghost_ui::EventLoop<()>, bus: &mut AppBus) -> Self {
+        let skin_bundle = crate::skin::load(&config.skin);
+        let (skin_width, skin_height) = (skin_bundle.width, skin_bundle.height);
+        let offset = calculate_callout_offset(config, skin_width, skin_height);
+        let (w, h) = calculate_callout_size(config);
+        let window = GhostWindowBuilder::new()
+            .with_size(w, h)
+            .with_always_on_top(true)
+            .with_draggable(false)
+            .with_click_through(true)
+            .with_alpha_hit_test(false)
+            .with_opacity_focused(1.0)
+            .with_opacity_unfocused(1.0)
+            .with_title("Ghost Callout")
+            .build(event_loop)
+            .expect("Failed to create callout window");
+
+        Self {
+            window,
+            offset,
+            logic: CalloutLogic {
+                callout: ui_design(config),
+                receiver: bus.callout_rx.take().expect("callout_rx already consumed"),
+                initialized: false,
+            },
+        }
+    }
+}
+
+impl ExtraWindow for CalloutWindow {
+    fn window_id(&self) -> WindowId { self.window.window().id() }
+
+    fn on_event(&mut self, _event: &WindowEvent) {}
+
+    fn update(&mut self, delta: f32) {
+        if self.logic.update(delta) {
+            self.window.request_redraw();
+        }
+    }
+
+    fn render(&mut self) {
+        if !self.logic.callout.is_visible() { return; }
+        if !self.logic.initialized {
+            self.window.init_callout_gpu(&mut self.logic);
+            if !self.logic.initialized { return; }
+        }
+        let size = self.window.window().inner_size();
+        let viewport = [size.width as f32, size.height as f32];
+        self.window.prepare_callout(&mut self.logic, viewport);
+        let _ = self.window.render_callout(&self.logic);
+    }
+
+    fn request_redraw(&self) {
+        if self.logic.callout.is_visible() { self.window.request_redraw(); }
+    }
+
+    fn is_visible(&self) -> bool { self.logic.callout.is_visible() }
+
+    fn set_position(&self, x: i32, y: i32) { self.window.set_position(x, y); }
+
+    fn on_primary_moved(&self, x: i32, y: i32) {
+        self.window.set_position(x + self.offset[0], y + self.offset[1]);
+    }
+
+    fn bring_to_front(&self) {}
+}
+
+/// Rendering logic, separate from the window so GhostWindow methods can borrow
+/// both halves independently (field splitting).
+struct CalloutLogic {
     callout: Callout,
     receiver: Receiver<CalloutCommand>,
     initialized: bool,
 }
 
-impl CalloutWindowApp {
-    pub fn new(config: &Config, bus: &mut AppBus) -> Self {
-        let receiver = bus.callout_rx.take().expect("callout_rx already consumed");
-        let callout = ui_design(config);
-        Self {
-            callout,
-            receiver,
-            initialized: false,
-        }
-    }
-
-    fn process_commands(&mut self) {
-        // Process all pending commands
-        while let Ok(cmd) = self.receiver.try_recv() {
-            match cmd {
-                CalloutCommand::Say(text) => self.callout.say(text),
-                CalloutCommand::Think(text) => self.callout.think(text),
-                CalloutCommand::Scream(text) => self.callout.scream(text),
-                CalloutCommand::Hide => self.callout.hide(),
-            }
-        }
-    }
-}
-
-impl CalloutApp for CalloutWindowApp {
+impl CalloutApp for CalloutLogic {
     fn init_gpu(&mut self, device: &Device, queue: &Queue, format: TextureFormat) {
         if !self.initialized {
             self.callout.init(device, queue, format);
             self.initialized = true;
-            log::info!("Callout window GPU initialized");
+            log::info!("Callout GPU initialized");
         }
     }
 
@@ -74,7 +124,6 @@ impl CalloutApp for CalloutWindowApp {
     }
 
     fn update(&mut self, delta: f32) -> bool {
-        // Process all pending commands
         let mut had_commands = false;
         while let Ok(cmd) = self.receiver.try_recv() {
             had_commands = true;
@@ -85,20 +134,14 @@ impl CalloutApp for CalloutWindowApp {
                 CalloutCommand::Hide => self.callout.hide(),
             }
         }
-
-        // Update callout animation - returns true if animation is active
         let was_visible = self.callout.is_visible();
         self.callout.update(delta);
         let is_visible = self.callout.is_visible();
-
-        // Need redraw if: had commands, visibility changed, or animation is running
         had_commands || (was_visible != is_visible) || (is_visible && self.callout.is_animating())
     }
 }
 
-/// Define "what the callout window looks like" — all visual setup in one place.
 fn ui_design(config: &Config) -> Callout {
-    // Create style with configured font size
     let style = CalloutStyle {
         background: config.callout.style.background,
         text_color: config.callout.style.text_color,
@@ -107,76 +150,41 @@ fn ui_design(config: &Config) -> Callout {
         border_radius: config.callout.style.border_radius,
         ..Default::default()
     };
-
-    // Parse animation
     let animation = match config.callout.animation.as_str() {
         "instant" => TextAnimation::Instant,
-        "word-by-word" | "wordbyword" => TextAnimation::WordByWord {
-            wps: config.callout.animation_speed,
-        },
-        "stream" => TextAnimation::Stream {
-            cps: config.callout.animation_speed,
-        },
-        _ => TextAnimation::Typewriter {
-            cps: config.callout.animation_speed,
-        },
+        "word-by-word" | "wordbyword" => TextAnimation::WordByWord { wps: config.callout.animation_speed },
+        "stream" => TextAnimation::Stream { cps: config.callout.animation_speed },
+        _ => TextAnimation::Typewriter { cps: config.callout.animation_speed },
     };
-
-    // Callout position is now relative to the callout window (0,0)
-    // The window itself is positioned by the offset
     let mut callout = Callout::new()
         .with_position(0.0, 0.0)
         .with_max_width(config.callout.max_width)
         .with_text_animation(animation)
         .with_style(style);
-
     if config.callout.duration > 0.0 {
         callout = callout.with_duration(Duration::from_secs_f32(config.callout.duration));
     }
-
     callout
 }
 
-/// Create a callout command channel
 pub fn create_callout_channel() -> (CalloutSender, Receiver<CalloutCommand>) {
     mpsc::channel()
 }
 
-/// Calculate callout window offset from main window based on config.
-///
-/// For right-side anchors the callout extends LEFT so it stays on-screen.
-/// For bottom-side anchors the callout extends UP.
 pub fn calculate_callout_offset(config: &Config, skin_width: u32, skin_height: u32) -> [i32; 2] {
     let anchor = Anchor::from_str(&config.callout.anchor);
     let (anchor_x, anchor_y) = anchor.as_fraction();
-
     let callout_size = calculate_callout_size(config);
-
-    // Calculate base position from anchor
     let mut x = skin_width as f32 * anchor_x;
     let mut y = skin_height as f32 * anchor_y;
-
-    // For right-side anchors, shift left by callout width so the bubble
-    // extends leftward from the anchor instead of off-screen to the right.
-    if anchor_x > 0.5 {
-        x -= callout_size.0 as f32;
-    }
-
-    // For bottom-side anchors, shift up by callout height
-    if anchor_y > 0.5 {
-        y -= callout_size.1 as f32;
-    }
-
-    // Apply user offset
+    if anchor_x > 0.5 { x -= callout_size.0 as f32; }
+    if anchor_y > 0.5 { y -= callout_size.1 as f32; }
     x += config.callout.offset[0];
     y += config.callout.offset[1];
-
     [x as i32, y as i32]
 }
 
-/// Calculate callout window size based on config
 pub fn calculate_callout_size(config: &Config) -> (u32, u32) {
-    // Estimate height based on font size and padding
     let estimated_height = (config.callout.font_size * 3.0 + config.callout.style.padding * 2.0) as u32;
     (config.callout.max_width as u32, estimated_height.max(100))
 }

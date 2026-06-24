@@ -2,7 +2,6 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 // -- Shared types --
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Rect {
     pub x: i32,
@@ -164,43 +163,25 @@ impl GhostState {
         inner.main_window.rect.height = h;
     }
 
-    pub fn skin_size(&self) -> (u32, u32) {
-        self.0.read().skin_size
-    }
+    pub fn skin_size(&self) -> (u32, u32) { self.0.read().skin_size }
 
-    pub fn set_skin_size(&self, w: u32, h: u32) {
-        self.0.write().skin_size = (w, h);
-    }
+    pub fn set_skin_size(&self, w: u32, h: u32) { self.0.write().skin_size = (w, h); }
 
-    pub fn set_main_state(&self, state: WinState) {
-        self.0.write().main_window.state = state;
-    }
+    pub fn set_main_state(&self, state: WinState) { self.0.write().main_window.state = state; }
 
-    pub fn set_main_opacity(&self, opacity: f32) {
-        self.0.write().main_window.opacity = opacity;
-    }
+    pub fn set_main_opacity(&self, opacity: f32) { self.0.write().main_window.opacity = opacity; }
 
     // -- Chat window --
 
-    pub fn chat_window(&self) -> WindowState {
-        self.0.read().chat_window.clone()
-    }
+    pub fn chat_window(&self) -> WindowState { self.0.read().chat_window.clone() }
 
-    pub fn chat_visible(&self) -> bool {
-        self.0.read().chat_window.visible
-    }
+    pub fn chat_visible(&self) -> bool { self.0.read().chat_window.visible }
 
-    pub fn chat_snapped(&self) -> bool {
-        self.0.read().chat_window.snapped
-    }
+    pub fn chat_snapped(&self) -> bool { self.0.read().chat_window.snapped }
 
-    pub fn set_chat_visible(&self, v: bool) {
-        self.0.write().chat_window.visible = v;
-    }
+    pub fn set_chat_visible(&self, v: bool) { self.0.write().chat_window.visible = v; }
 
-    pub fn set_chat_snapped(&self, v: bool) {
-        self.0.write().chat_window.snapped = v;
-    }
+    pub fn set_chat_snapped(&self, v: bool) { self.0.write().chat_window.snapped = v; }
 
     pub fn set_chat_pos(&self, x: i32, y: i32) {
         let mut inner = self.0.write();
@@ -208,83 +189,46 @@ impl GhostState {
         inner.chat_window.rect.y = y;
     }
 
-    pub fn chat_last_set_pos(&self) -> (i32, i32) {
-        self.0.read().chat_window.last_set_pos
-    }
+    pub fn chat_last_set_pos(&self) -> (i32, i32) { self.0.read().chat_window.last_set_pos }
 
-    pub fn set_chat_last_set_pos(&self, x: i32, y: i32) {
-        self.0.write().chat_window.last_set_pos = (x, y);
-    }
+    pub fn set_chat_last_set_pos(&self, x: i32, y: i32) { self.0.write().chat_window.last_set_pos = (x, y); }
 
-    pub fn chat_just_resized(&self) -> bool {
-        self.0.read().chat_window.just_resized
-    }
+    pub fn chat_just_resized(&self) -> bool { self.0.read().chat_window.just_resized }
 
-    pub fn set_chat_just_resized(&self, v: bool) {
-        self.0.write().chat_window.just_resized = v;
-    }
+    pub fn set_chat_just_resized(&self, v: bool) { self.0.write().chat_window.just_resized = v; }
 
     // -- Callout window --
 
-    pub fn callout_visible(&self) -> bool {
-        self.0.read().callout_window.visible
-    }
+    pub fn callout_visible(&self) -> bool { self.0.read().callout_window.visible }
 
-    pub fn set_callout_visible(&self, v: bool) {
-        self.0.write().callout_window.visible = v;
-    }
+    pub fn set_callout_visible(&self, v: bool) { self.0.write().callout_window.visible = v; }
 
     // -- Snap config --
 
-    pub fn snap_config(&self) -> SnapConfig {
-        self.0.read().snap_config.clone()
-    }
+    pub fn snap_config(&self) -> SnapConfig { self.0.read().snap_config.clone() }
 
-    pub fn set_snap_config(&self, config: SnapConfig) {
-        self.0.write().snap_config = config;
-    }
+    pub fn set_snap_config(&self, config: SnapConfig) { self.0.write().snap_config = config; }
 
     pub fn set_main_focused(&self, focused: bool) {
-        self.0.write().main_window.state = if focused {
-            WinState::Focused
-        } else {
-            WinState::Behind
-        };
+        self.0.write().main_window.state = if focused { WinState::Focused } else { WinState::Behind };
     }
 
     // -- Log window --
 
-    pub fn log_visible(&self) -> bool {
-        self.0.read().log_window.visible
-    }
+    pub fn log_visible(&self) -> bool { self.0.read().log_window.visible }
+    pub fn set_log_visible(&self, v: bool) { self.0.write().log_window.visible = v; }
 
-    pub fn set_log_visible(&self, v: bool) {
-        self.0.write().log_window.visible = v;
-    }
+    pub fn log_snapped(&self) -> bool { self.0.read().log_window.snapped }
 
-    pub fn log_snapped(&self) -> bool {
-        self.0.read().log_window.snapped
-    }
+    pub fn set_log_snapped(&self, v: bool) { self.0.write().log_window.snapped = v; }
 
-    pub fn set_log_snapped(&self, v: bool) {
-        self.0.write().log_window.snapped = v;
-    }
+    pub fn log_last_set_pos(&self) -> (i32, i32) { self.0.read().log_window.last_set_pos }
 
-    pub fn log_last_set_pos(&self) -> (i32, i32) {
-        self.0.read().log_window.last_set_pos
-    }
+    pub fn set_log_last_set_pos(&self, x: i32, y: i32) { self.0.write().log_window.last_set_pos = (x, y); }
 
-    pub fn set_log_last_set_pos(&self, x: i32, y: i32) {
-        self.0.write().log_window.last_set_pos = (x, y);
-    }
+    pub fn log_just_resized(&self) -> bool { self.0.read().log_window.just_resized }
 
-    pub fn log_just_resized(&self) -> bool {
-        self.0.read().log_window.just_resized
-    }
-
-    pub fn set_log_just_resized(&self, v: bool) {
-        self.0.write().log_window.just_resized = v;
-    }
+    pub fn set_log_just_resized(&self, v: bool) { self.0.write().log_window.just_resized = v; }
 
     // -- Control window --
 
@@ -301,10 +245,6 @@ impl GhostState {
     }
 
     pub fn set_control_focused(&self, focused: bool) {
-        self.0.write().control_window.state = if focused {
-            WinState::Focused
-        } else {
-            WinState::Behind
-        };
+        self.0.write().control_window.state = if focused { WinState::Focused } else { WinState::Behind };
     }
 }

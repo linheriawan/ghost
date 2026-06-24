@@ -9,7 +9,7 @@ use tao::event::{ElementState, MouseButton, WindowEvent};
 use tao::event_loop::EventLoop;
 use tao::window::WindowId;
 
-use super::callout_window::{CalloutCommand, CalloutSender};
+use super::callout_window::CalloutSender;
 use crate::bus::AppBus;
 
 /// Commands to show or hide the control window
@@ -32,11 +32,11 @@ pub struct ControlApp { callout_tx: CalloutSender, }
 impl ControlApp {
     pub fn new(callout_tx: CalloutSender) -> Self { Self { callout_tx } }
 
-    fn send(&self, cmd: CalloutCommand) {
-        if let Err(e) = self.callout_tx.send(cmd) {
-            log::error!("Control: failed to send callout: {}", e);
-        }
-    }
+    // fn send(&self, cmd: CalloutCommand) {
+    //     if let Err(e) = self.callout_tx.send(cmd) {
+    //         log::error!("Control: failed to send callout: {}", e);
+    //     }
+    // }
 }
 
 impl GhostApp for ControlApp {
@@ -105,9 +105,7 @@ impl ControlWindow {
 }
 
 impl ExtraWindow for ControlWindow {
-    fn window_id(&self) -> WindowId {
-        self.window.window().id()
-    }
+    fn window_id(&self) -> WindowId { self.window.window().id() }
 
     fn on_event(&mut self, event: &WindowEvent) {
         let window_height = self.window.window().inner_size().height as f32;
@@ -216,7 +214,7 @@ impl ExtraWindow for ControlWindow {
             if let Some(wr) = self.window.init_app_gpu(&mut self.app) {
                 self.widget_renderer = Some(wr);
                 self.gpu_initialized = true;
-            } 
+            }
             else { return; }
         }
 

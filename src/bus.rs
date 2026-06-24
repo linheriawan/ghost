@@ -6,6 +6,7 @@ use crate::windows::callout_window::{create_callout_channel, CalloutCommand, Cal
 use crate::windows::chat_window::{create_chat_channel, ChatReceiver, ChatSender};
 use crate::windows::control_window::{create_control_channel, ControlReceiver, ControlSender};
 use crate::windows::log_window::{create_Log_channel, LogReceiver, LogSender};
+use crate::windows::main_window::{create_main_channel, MainReceiver, MainSender};
 
 /// Clonable sender-only view of AppBus. Pass to components that only need to send.
 #[derive(Clone)]
@@ -14,6 +15,7 @@ pub struct AppSenders {
     pub callout_tx: CalloutSender,
     pub log_tx: LogSender,
     pub ctrl_tx: ControlSender,
+    pub main_tx: MainSender,
     pub brain_tx: Option<Sender<BrainCommand>>,
 }
 
@@ -27,6 +29,7 @@ pub struct AppBus {
     pub callout_tx: CalloutSender,
     pub log_tx: LogSender,
     pub ctrl_tx: ControlSender,
+    pub main_tx: MainSender,
     pub brain_tx: Option<Sender<BrainCommand>>,
 
     // -- receivers (consumed by exactly one window via take()) --
@@ -34,6 +37,7 @@ pub struct AppBus {
     pub callout_rx: Option<Receiver<CalloutCommand>>,
     pub log_rx: Option<LogReceiver>,
     pub ctrl_rx: Option<ControlReceiver>,
+    pub main_rx: Option<MainReceiver>,
     pub brain_rx: Option<Receiver<BrainResponse>>,
 }
 
@@ -44,6 +48,7 @@ impl AppBus {
         let (callout_tx, callout_rx) = create_callout_channel();
         let (log_tx, log_rx) = create_Log_channel();
         let (ctrl_tx, ctrl_rx) = create_control_channel();
+        let (main_tx, main_rx) = create_main_channel();
 
         let (brain_tx, brain_rx) = if let Some(ref brain_config) = config.brain {
             log::info!("Brain config found, spawning BrainService...");
@@ -60,11 +65,13 @@ impl AppBus {
             callout_tx,
             log_tx,
             ctrl_tx,
+            main_tx,
             brain_tx,
             chat_rx: Some(chat_rx),
             callout_rx: Some(callout_rx),
             log_rx: Some(log_rx),
             ctrl_rx: Some(ctrl_rx),
+            main_rx: Some(main_rx),
             brain_rx,
         }
     }
@@ -76,6 +83,7 @@ impl AppBus {
             callout_tx: self.callout_tx.clone(),
             log_tx: self.log_tx.clone(),
             ctrl_tx: self.ctrl_tx.clone(),
+            main_tx: self.main_tx.clone(),
             brain_tx: self.brain_tx.clone(),
         }
     }

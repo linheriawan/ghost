@@ -5,6 +5,22 @@ use std::path::Path;
 
 pub use ghost_ui::LayerConfig;
 
+fn default_window_position() -> String { "bottom-right".to_string() }
+fn default_chat_anchor() -> String { "right".to_string() }
+fn default_chat_align() -> String { "bottom".to_string() }
+fn default_chat_size() -> [u32; 2] { [400, 500] }
+fn default_skin_fps() -> f32 { 24.0 }
+fn default_font_size() -> f32 { 16.0 }
+fn default_animation() -> String { "typewriter".to_string() }
+fn default_animation_speed() -> f32 { 30.0 }
+fn default_duration() -> f32 { 5.0 }
+fn default_background() -> [f32; 4] { [1.0, 1.0, 1.0, 0.95] }
+fn default_text_color() -> [f32; 4] { [0.1, 0.1, 0.1, 1.0] }
+fn default_padding() -> f32 { 14.0 }
+fn default_border_radius() -> f32 { 10.0 }
+fn default_button_size() -> [f32; 2] { [60.0, 28.0] }
+fn default_button_style() -> String { "default".to_string() }
+
 /// Root configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -21,6 +37,40 @@ pub struct Config {
     /// Brain (LLM / TTS / STT) configuration — optional.
     pub brain: Option<BrainConfig>,
 }
+
+impl Config {
+    /// Load configuration from a TOML file
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let content = std::fs::read_to_string(path.as_ref())
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        let cfg=toml::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()));
+
+        dbg!(&cfg);
+        return cfg;
+    }
+
+    /// Load from default path (ui.toml in current directory)
+    pub fn load_default() -> Result<Self, ConfigError> {
+        Self::load("ui.toml")
+    }
+}
+
+#[derive(Debug)]
+pub enum ConfigError {
+    Io(String),
+    Parse(String),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "IO error: {}", e),
+            Self::Parse(e) => write!(f, "Parse error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
 
 /// Brain module configuration
 #[derive(Debug, Clone, Deserialize)]
@@ -72,10 +122,6 @@ impl Default for WindowStartConfig {
             offset: [0, 0],
         }
     }
-}
-
-fn default_window_position() -> String {
-    "bottom-right".to_string()
 }
 
 impl WindowStartConfig {
@@ -136,18 +182,6 @@ impl Default for ChatConfig {
             size: default_chat_size(),
         }
     }
-}
-
-fn default_chat_anchor() -> String {
-    "right".to_string()
-}
-
-fn default_chat_align() -> String {
-    "bottom".to_string()
-}
-
-fn default_chat_size() -> [u32; 2] {
-    [400, 500]
 }
 
 impl ChatConfig {
@@ -230,10 +264,6 @@ pub struct SkinConfig {
     pub fps: f32,
 }
 
-fn default_skin_fps() -> f32 {
-    24.0
-}
-
 /// Callout configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct CalloutConfig {
@@ -260,11 +290,6 @@ pub struct CalloutConfig {
     pub style: CalloutStyleConfig,
 }
 
-fn default_font_size() -> f32 { 16.0 }
-fn default_animation() -> String { "typewriter".to_string() }
-fn default_animation_speed() -> f32 { 30.0 }
-fn default_duration() -> f32 { 5.0 }
-
 /// Callout style configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct CalloutStyleConfig {
@@ -289,11 +314,6 @@ impl Default for CalloutStyleConfig {
     }
 }
 
-fn default_background() -> [f32; 4] { [1.0, 1.0, 1.0, 0.95] }
-fn default_text_color() -> [f32; 4] { [0.1, 0.1, 0.1, 1.0] }
-fn default_padding() -> f32 { 14.0 }
-fn default_border_radius() -> f32 { 10.0 }
-
 /// Button configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct ButtonConfig {
@@ -305,10 +325,6 @@ pub struct ButtonConfig {
     #[serde(default = "default_button_style")]
     pub style: String,
 }
-
-
-fn default_button_size() -> [f32; 2] { [60.0, 28.0] }
-fn default_button_style() -> String { "default".to_string() }
 
 /// Anchor position enum
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -369,37 +385,3 @@ pub struct WindowLayout {
     /// Skin offset within window [x, y]
     pub skin_offset: [f32; 2],
 }
-
-impl Config {
-    /// Load configuration from a TOML file
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
-        let content = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
-        let cfg=toml::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()));
-
-        dbg!(&cfg);
-        return cfg;
-    }
-
-    /// Load from default path (ui.toml in current directory)
-    pub fn load_default() -> Result<Self, ConfigError> {
-        Self::load("ui.toml")
-    }
-}
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Io(String),
-    Parse(String),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "IO error: {}", e),
-            Self::Parse(e) => write!(f, "Parse error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
