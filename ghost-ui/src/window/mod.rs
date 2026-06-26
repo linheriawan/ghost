@@ -152,9 +152,7 @@ impl GhostWindow {
 
     /// Set the window position (in physical pixels).
     pub fn set_position(&self, x: i32, y: i32) {
-        self.data
-            .window
-            .set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+        self.data.window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
     }
 
     /// Set the opacity directly (bypasses focus-based opacity).
@@ -187,29 +185,19 @@ impl GhostWindow {
     }
 
     /// Get the current opacity value.
-    pub fn opacity(&self) -> f32 {
-        self.data.current_opacity
-    }
+    pub fn opacity(&self) -> f32 { self.data.current_opacity }
 
     /// Get a reference to the underlying tao window.
-    pub fn window(&self) -> &Window {
-        &self.data.window
-    }
+    pub fn window(&self) -> &Window { &self.data.window }
 
     /// Request a redraw of the window.
-    pub fn request_redraw(&self) {
-        self.data.window.request_redraw();
-    }
+    pub fn request_redraw(&self) { self.data.window.request_redraw(); }
 
     /// Set the skin offset within the window.
-    pub fn set_skin_offset(&mut self, offset: [f32; 2]) {
-        self.data.skin_offset = offset;
-    }
+    pub fn set_skin_offset(&mut self, offset: [f32; 2]) { self.data.skin_offset = offset; }
 
     /// Get the skin offset within the window.
-    pub fn skin_offset(&self) -> [f32; 2] {
-        self.data.skin_offset
-    }
+    pub fn skin_offset(&self) -> [f32; 2] { self.data.skin_offset }
 
     /// Render with widget renderer and app's custom rendering
     pub fn render_with_widgets_and_app<A: GhostApp>(
@@ -266,11 +254,8 @@ impl GhostWindow {
 
     /// Update opacity based on current focus state.
     fn update_opacity_for_focus(&mut self) {
-        self.data.current_opacity = if self.data.is_focused {
-            self.data.config.opacity_focused
-        } else {
-            self.data.config.opacity_unfocused
-        };
+        self.data.current_opacity = if self.data.is_focused { self.data.config.opacity_focused }
+            else { self.data.config.opacity_unfocused };
     }
 
     /// Handle cursor movement.
@@ -328,17 +313,13 @@ impl GhostWindow {
 
     /// Test if the cursor is over a non-transparent pixel.
     fn hit_test_at_cursor(&self) -> bool {
-        let Some(cursor_pos) = self.data.cursor_position else {
-            return false;
-        };
+        let Some(cursor_pos) = self.data.cursor_position else { return false; };
 
         let Some(ref skin) = self.data.skin else {
             return true; // No skin = solid window
         };
 
-        let Some((orig_w, orig_h)) = self.data.original_skin_size else {
-            return true;
-        };
+        let Some((orig_w, orig_h)) = self.data.original_skin_size else { return true; };
 
         // Get current window size
         let (win_w, win_h) = self.data.last_size;
@@ -358,22 +339,14 @@ impl GhostWindow {
 
     /// Check if a click at the current cursor position should be handled.
     pub fn should_handle_click(&self) -> bool {
-        if self.data.config.click_through {
-            return false;
-        }
-
-        if !self.data.config.alpha_hit_test {
-            return true;
-        }
-
+        if self.data.config.click_through { return false; }
+        if !self.data.config.alpha_hit_test { return true; }
         self.hit_test_at_cursor()
     }
 
     /// Handle a window resize event, maintaining aspect ratio if configured.
     pub fn handle_resize(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
+        if width == 0 || height == 0 { return; }
 
         // Clamp to max texture size
         let (clamped_width, clamped_height) = clamp_to_max_size(width, height, MAX_TEXTURE_SIZE);
@@ -417,40 +390,26 @@ impl GhostWindow {
         }
     }
 
+    /// Show or hide the underlying window.
+    pub fn set_visible(&self, visible: bool) { self.data.window.set_visible(visible); }
+    /// Set keyboard focus to this window.
+    pub fn set_focus(&self) { self.data.window.set_focus(); }
     /// Check if the window is draggable.
-    pub fn is_draggable(&self) -> bool {
-        self.data.config.draggable
-    }
-
+    pub fn is_draggable(&self) -> bool { self.data.config.draggable }
     /// Check if the window is focused.
-    pub fn is_focused(&self) -> bool {
-        self.data.is_focused
-    }
-
+    pub fn is_focused(&self) -> bool { self.data.is_focused }
     /// Start dragging the window.
-    pub fn drag(&self) {
-        let _ = self.data.window.drag_window();
-    }
-
+    pub fn drag(&self) { let _ = self.data.window.drag_window(); }
     /// Get the window's outer position (screen coordinates).
     pub fn outer_position(&self) -> Option<(i32, i32)> {
         self.data.window.outer_position().ok().map(|p| (p.x, p.y))
     }
-
     /// Get the current aspect ratio.
-    pub fn aspect_ratio(&self) -> f32 {
-        self.data.aspect_ratio
-    }
-
+    pub fn aspect_ratio(&self) -> f32 { self.data.aspect_ratio }
     /// Set whether to maintain aspect ratio during resize.
-    pub fn set_maintain_aspect_ratio(&mut self, maintain: bool) {
-        self.data.config.maintain_aspect_ratio = maintain;
-    }
-
+    pub fn set_maintain_aspect_ratio(&mut self, maintain: bool) { self.data.config.maintain_aspect_ratio = maintain; }
     /// Set the alpha threshold for hit testing.
-    pub fn set_alpha_threshold(&mut self, threshold: u8) {
-        self.data.config.alpha_threshold = threshold;
-    }
+    pub fn set_alpha_threshold(&mut self, threshold: u8) { self.data.config.alpha_threshold = threshold; }
 
     /// Initialize a GhostApp's GPU resources and return a WidgetRenderer.
     /// Returns None if the renderer is not yet ready (call again on next redraw).
@@ -478,6 +437,8 @@ impl GhostWindow {
         app: &mut A,
         viewport: [f32; 2],
     ) {
+        // dbg!(&app.labels());
+        // dbg!(&app.marquee_labels());
         if let Some(ref renderer) = self.renderer {
             let sf = self.data.window.scale_factor() as f32;
             let marquee_widths = {
@@ -485,6 +446,7 @@ impl GhostWindow {
                 let button_images = app.button_images();
                 let labels = app.labels();
                 let marquees = app.marquee_labels();
+
                 widget_renderer.prepare(
                     renderer.device(), renderer.queue(),
                     &buttons, &button_images, &labels, &marquees,
@@ -526,15 +488,6 @@ impl GhostWindow {
         }
     }
 
-    /// Show or hide the underlying window.
-    pub fn set_visible(&self, visible: bool) {
-        self.data.window.set_visible(visible);
-    }
-
-    /// Set keyboard focus to this window.
-    pub fn set_focus(&self) {
-        self.data.window.set_focus();
-    }
 }
 
 /// Events that can be emitted by the ghost window
@@ -569,64 +522,42 @@ pub trait GhostApp {
     fn update(&mut self, _delta: f32) {}
 
     /// Return true if the app wants to quit
-    fn should_quit(&self) -> bool {
-        false
-    }
+    fn should_quit(&self) -> bool { false }
 
     /// Called when an event occurs
     fn on_event(&mut self, event: GhostEvent);
 
     /// Called before rendering, return buttons to render
-    fn buttons(&self) -> Vec<&crate::elements::Button> {
-        Vec::new()
-    }
+    fn buttons(&self) -> Vec<&crate::elements::Button> { Vec::new() }
 
     /// Called to update button states (for hover effects, etc.)
-    fn buttons_mut(&mut self) -> Vec<&mut crate::elements::Button> {
-        Vec::new()
-    }
+    fn buttons_mut(&mut self) -> Vec<&mut crate::elements::Button> { Vec::new() }
 
     /// Return image buttons to render
-    fn button_images(&self) -> Vec<&crate::elements::ButtonImage> {
-        Vec::new()
-    }
+    fn button_images(&self) -> Vec<&crate::elements::ButtonImage> { Vec::new() }
 
     /// Return mutable image buttons (for hover/press state updates)
-    fn button_images_mut(&mut self) -> Vec<&mut crate::elements::ButtonImage> {
-        Vec::new()
-    }
+    fn button_images_mut(&mut self) -> Vec<&mut crate::elements::ButtonImage> { Vec::new() }
 
     /// Return labels to render
-    fn labels(&self) -> Vec<&crate::elements::Label> {
-        Vec::new()
-    }
+    fn labels(&self) -> Vec<&crate::elements::Label> { Vec::new() }
 
     /// Return marquee labels to render
-    fn marquee_labels(&self) -> Vec<&crate::elements::MarqueeLabel> {
-        Vec::new()
-    }
+    fn marquee_labels(&self) -> Vec<&crate::elements::MarqueeLabel> { Vec::new() }
 
     /// Return mutable marquee labels (for scroll animation updates)
-    fn marquee_labels_mut(&mut self) -> Vec<&mut crate::elements::MarqueeLabel> {
-        Vec::new()
-    }
+    fn marquee_labels_mut(&mut self) -> Vec<&mut crate::elements::MarqueeLabel> { Vec::new() }
 
     /// Return the current skin to render (for animated skins)
     /// If None, the window's static skin will be used
-    fn current_skin(&self) -> Option<&crate::Skin> {
-        None
-    }
+    fn current_skin(&self) -> Option<&crate::Skin> { None }
 
     /// Return true if the app needs continuous frame updates (for animations)
     /// When true, the event loop will use Poll instead of Wait
-    fn needs_continuous_update(&self) -> bool {
-        self.current_skin().is_some()
-    }
+    fn needs_continuous_update(&self) -> bool { self.current_skin().is_some() }
 
     /// Return the target frames per second for animations (default: 30)
-    fn target_fps(&self) -> f32 {
-        30.0
-    }
+    fn target_fps(&self) -> f32 { 30.0 }
 
     /// Called before rendering to prepare GPU resources (callouts, etc.)
     /// scale_factor is the display's DPI scale (1.0 for standard, 2.0 for Retina)

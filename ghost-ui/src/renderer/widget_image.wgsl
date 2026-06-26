@@ -16,7 +16,9 @@ struct Uniforms {
     viewport: vec4<f32>,    // width, height, 0, 0
     rect: vec4<f32>,        // x, y, width, height (pixels)
     brightness: f32,        // 1.0 normal, 1.15 hover, 0.9 pressed
-    _padding: vec3<f32>,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 @group(0) @binding(0)

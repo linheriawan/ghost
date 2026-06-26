@@ -88,13 +88,11 @@ impl<'window> Renderer<'window> {
             .unwrap_or(surface_caps.formats[0]);
 
         // Find best alpha mode for transparency
-        let alpha_mode = if surface_caps
-            .alpha_modes
+        let alpha_mode = if surface_caps.alpha_modes
             .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
         {
             wgpu::CompositeAlphaMode::PreMultiplied
-        } else if surface_caps
-            .alpha_modes
+        } else if surface_caps.alpha_modes
             .contains(&wgpu::CompositeAlphaMode::PostMultiplied)
         {
             wgpu::CompositeAlphaMode::PostMultiplied
@@ -127,14 +125,10 @@ impl<'window> Renderer<'window> {
     }
 
     /// Get a reference to the device.
-    pub fn device(&self) -> &Device {
-        &self.device
-    }
+    pub fn device(&self) -> &Device { &self.device }
 
     /// Get a reference to the queue.
-    pub fn queue(&self) -> &Queue {
-        &self.queue
-    }
+    pub fn queue(&self) -> &Queue { &self.queue }
 
     /// Resize the renderer surface.
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -146,9 +140,7 @@ impl<'window> Renderer<'window> {
     }
 
     /// Get the surface texture format.
-    pub fn format(&self) -> TextureFormat {
-        self.config.format
-    }
+    pub fn format(&self) -> TextureFormat { self.config.format }
 
     /// Render a skin with widget renderer and app's custom rendering.
     pub fn render_with_widgets_and_app<'a, A: crate::GhostApp>(
@@ -174,12 +166,10 @@ impl<'window> Renderer<'window> {
         }
 
         let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
+        let view = output.texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .device
+        let mut encoder = self.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
@@ -215,7 +205,6 @@ impl<'window> Renderer<'window> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-
         Ok(())
     }
 
@@ -225,12 +214,10 @@ impl<'window> Renderer<'window> {
         app: &'a C,
     ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
+        let view = output.texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .device
+        let mut encoder = self.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Callout Render Encoder"),
             });

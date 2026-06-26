@@ -47,6 +47,11 @@ impl GhostApp for Coordinator {
     fn on_event(&mut self, event: GhostEvent) { self.inner.on_event(event); }
     fn buttons(&self) -> Vec<&ghost_ui::Button> { self.inner.buttons() }
     fn buttons_mut(&mut self) -> Vec<&mut ghost_ui::Button> { self.inner.buttons_mut() }
+    fn button_images(&self) -> Vec<&ghost_ui::ButtonImage> { self.inner.button_images() }
+    fn button_images_mut(&mut self) -> Vec<&mut ghost_ui::ButtonImage> { self.inner.button_images_mut() }
+    fn labels(&self) -> Vec<&ghost_ui::Label> { self.inner.labels() }
+    fn marquee_labels(&self) -> Vec<&ghost_ui::MarqueeLabel> { self.inner.marquee_labels() }
+    fn marquee_labels_mut(&mut self) -> Vec<&mut ghost_ui::MarqueeLabel> { self.inner.marquee_labels_mut() }
     fn current_skin(&self) -> Option<&Skin> { self.inner.current_skin() }
     fn target_fps(&self) -> f32 { self.inner.target_fps() }
 

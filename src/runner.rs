@@ -19,7 +19,6 @@ pub fn run<A>(
     let mut last_frame = Instant::now();
     let mut widget_renderer: Option<WidgetRenderer> = None;
     let mut main_gpu_ready = false;
-
     if let Some((x, y)) = main_window.outer_position() {
         for f in &followers { f.on_primary_moved(x, y); }
     }
@@ -153,6 +152,7 @@ pub fn run<A>(
                 }
                 let size = main_window.window().inner_size();
                 let viewport = [size.width as f32, size.height as f32];
+
                 if let Some(ref mut wr) = widget_renderer {
                     main_window.widget_prepare(wr, &mut app, viewport);
                 }

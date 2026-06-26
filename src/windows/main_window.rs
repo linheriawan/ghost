@@ -182,11 +182,9 @@ impl App {
         let bus = bus.senders();
         let load_state = if let Some(receiver) = skin.load_rx {
             SkinLoadState::Loading { receiver }
-        } else if skin.animated.is_some() {
-            SkinLoadState::Ready
-        } else {
-            SkinLoadState::Static
-        };
+        }
+        else if skin.animated.is_some() { SkinLoadState::Ready }
+        else { SkinLoadState::Static };
 
         let load_state_is_loading = matches!(load_state, SkinLoadState::Loading { .. });
 

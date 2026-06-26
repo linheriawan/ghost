@@ -12,7 +12,7 @@ mod ui;
 mod vars;
 mod windows;
 
-use ghost_ui::{EventLoop, GhostWindowBuilder};
+use ghost_ui::{EventLoop, GhostApp, GhostWindowBuilder};
 
 fn main() {
     env_logger::init();
@@ -67,36 +67,35 @@ fn main() {
     if let Some(ref data) = skin_bundle.static_data {
         window_builder = window_builder.with_skin_data(data);
     }
-    let main_window = window_builder.build(&event_loop).expect("Failed to create main window");
+    let main_win = window_builder.build(&event_loop).expect("Failed to create main window");
 
-    if let Some(monitor) = main_window.window().current_monitor() {
+    if let Some(monitor) = main_win.window().current_monitor() {
         let mon = monitor.size();
         dbg!(&mon);
-        let win = main_window.window().outer_size();
+        let win = main_win.window().outer_size();
         dbg!(&win);
         let (x, y) = config.window.calculate_position(mon.width, mon.height, win.width, win.height);
-        main_window.set_position(x, y);
+        main_win.set_position(x, y);
         println!("Main window at ({}, {}) [{}]", &x, &y, &config.window.position);
     }
 
     // --- 9. APPS ---
     let main_app = windows::main_window::App::new(config.clone(), skin_bundle, &mut bus, ghost_state.clone());
     let coordinator = coordinator::Coordinator::new(main_app, tray_components.menu_ids, bus.senders());
-
     // --- 10. SNAP CONFIG ---
     let chat_offset = config.chat.calculate_offset_with_size(skin_width, skin_height, chat_size);
-    let scale_factor = main_window.window().scale_factor();
+    let scale_factor = main_win.window().scale_factor();
     ghost_state.set_snap_config(vars::SnapConfig {
         scaled_extra_offset: [
             (chat_offset[0] as f64 * scale_factor) as i32,
             (chat_offset[1] as f64 * scale_factor) as i32,
         ],
     });
-    if let Some((x, y)) = main_window.outer_position() { ghost_state.set_main_pos(x, y); }
+    if let Some((x, y)) = main_win.outer_position() { ghost_state.set_main_pos(x, y); }
 
     // --- 11. RUN ---
     runner::run(
-        main_window,
+        main_win,
         event_loop,
         coordinator,
         vec![
