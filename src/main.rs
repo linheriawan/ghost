@@ -4,7 +4,6 @@ mod actions;
 mod brain;
 mod bus;
 mod config;
-mod coordinator;
 mod runner;
 mod skin;
 mod tray;
@@ -12,7 +11,7 @@ mod ui;
 mod vars;
 mod windows;
 
-use ghost_ui::{EventLoop, GhostApp, GhostWindowBuilder};
+use ghost_ui::{EventLoop, GhostWindowBuilder};
 
 fn main() {
     env_logger::init();
@@ -49,7 +48,7 @@ fn main() {
     let log_win = windows::log_window::LogWindow::new(
         &event_loop, &mut bus, chat_size, assistant_name.clone(), ghost_state.clone(), &config.chat,
     );
-    let ctrl_win = windows::control_window::ControlWindow::new(&event_loop, &mut bus);
+    let ctrl_win = windows::control_window::create_control_window(&event_loop, &mut bus);
 
     // --- 7. CALLOUT WINDOW ---
     let callout_win = windows::callout_window::CalloutWindow::new(&config, &event_loop, &mut bus);
@@ -79,9 +78,8 @@ fn main() {
         println!("Main window at ({}, {}) [{}]", &x, &y, &config.window.position);
     }
 
-    // --- 9. APPS ---
-    let main_app = windows::main_window::App::new(config.clone(), skin_bundle, &mut bus, ghost_state.clone());
-    let coordinator = coordinator::Coordinator::new(main_app, tray_components.menu_ids, bus.senders());
+    // --- 9. APP ---
+    let main_app = windows::main_window::App::new(config.clone(), skin_bundle, &mut bus, ghost_state.clone(), tray_components.menu_ids);
     // --- 10. SNAP CONFIG ---
     let chat_offset = config.chat.calculate_offset_with_size(skin_width, skin_height, chat_size);
     let scale_factor = main_win.window().scale_factor();
@@ -97,7 +95,7 @@ fn main() {
     runner::run(
         main_win,
         event_loop,
-        coordinator,
+        main_app,
         vec![
             Box::new(callout_win) as Box<dyn ghost_ui::ExtraWindow>,
             Box::new(chat_win) as Box<dyn ghost_ui::ExtraWindow>,

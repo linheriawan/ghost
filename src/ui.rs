@@ -3,10 +3,23 @@
 //! Buttons are defined in code (make_btn); ui.toml can override their position/size/style.
 //! Layers, images, labels, and marquees each have a matching factory.
 
+pub use ghost_ui::AnyWidget;
 use ghost_ui::{
-    Button, ButtonId, ButtonImage, ButtonStyle, Label, LabelId, LabelStyle,
-    Layer, LayerConfig, MarqueeLabel, Origin,
+    Button, ButtonId, ButtonImage, ButtonStyle, GhostApp, GhostEvent, Label, LabelId,
+    LabelStyle, Layer, LayerConfig, MarqueeLabel, Origin,
 };
+
+pub struct Widgets(pub Vec<AnyWidget>);
+
+impl Widgets {
+    pub fn new(inner: Vec<AnyWidget>) -> Self { Self(inner) }
+}
+
+impl GhostApp for Widgets {
+    fn on_event(&mut self, _: GhostEvent) {}
+    fn widget_list(&self) -> &[AnyWidget] { &self.0 }
+    fn widgets_mut(&mut self) -> Option<&mut Vec<AnyWidget>> { Some(&mut self.0) }
+}
 
 use crate::config::Config;
 use crate::vars::GhostState;
@@ -44,7 +57,19 @@ pub fn make_btn(
         .with_style(style)
         .with_origin(Origin::BottomLeft)
 }
-
+pub fn mk_btn(
+    id: &str,
+    label: &str,
+    pos: [f32; 2],
+    size: [f32; 2],
+    style: ButtonStyle,
+) -> Button {
+    Button::new(get_button_id(id), label)
+        .with_position(pos[0], pos[1])
+        .with_size(size[0], size[1])
+        .with_style(style)
+        .with_origin(Origin::TopLeft)
+}
 /// Build a Layer from a config entry; logs and returns None on load failure.
 pub fn make_layer(cfg: &LayerConfig, state: &GhostState) -> Option<Layer> {
     let (w, h) = state.skin_size();

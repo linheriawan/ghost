@@ -60,12 +60,12 @@ pub use layer::{Layer, LayerAnchor, LayerConfig, LayerRenderer, TextAlign, TextV
 
 // Window
 pub use window::{
-    CalloutApp, CalloutWindowConfig, ExtraWindow,
-    GhostApp, GhostEvent, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
+    CalloutWindowConfig, ExtraWindow,
+    GhostApp, GhostEvent, GhostFollower, GhostWindow, GhostWindowBuilder, GpuResources, WindowConfig, WindowError,
 };
 
 // Elements system
-pub use elements::{Button, ButtonId, ButtonImage, ButtonState, ButtonStyle, FontStyle, Label, LabelId, LabelStyle, MarqueeLabel, Origin, Widget};
+pub use elements::{AnyWidget, Button, ButtonId, ButtonImage, ButtonState, ButtonStyle, FontStyle, Label, LabelId, LabelStyle, MarqueeLabel, Origin, Widget};
 
 // Callout (merged from ghost-callout)
 pub use elements::callout::{Callout, CalloutBuilder, CalloutShapeRenderer, CalloutTextAnimator, CalloutTextRenderer};

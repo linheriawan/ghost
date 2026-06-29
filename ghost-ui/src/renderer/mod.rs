@@ -201,49 +201,13 @@ impl<'window> Renderer<'window> {
             if let Some(wid_renderer) = widget_renderer {
                 wid_renderer.render(&mut render_pass);
             }
+
+            // App-defined custom draw calls (e.g. callout bubbles)
+            app.render_self(&mut render_pass);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-        Ok(())
-    }
-
-    /// Render a transparent window with callout app content (no skin).
-    pub fn render_callout<'a, C: crate::CalloutApp>(
-        &'a mut self,
-        app: &'a C,
-    ) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        let view = output.texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = self.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Callout Render Encoder"),
-            });
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Callout Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            app.render(&mut render_pass);
-        }
-
-        self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
-
         Ok(())
     }
 }

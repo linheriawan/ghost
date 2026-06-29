@@ -1,11 +1,11 @@
 //! Callout window — self-contained window that renders the callout bubble.
 
-use ghost_ui::{Callout, CalloutApp, CalloutStyle, ExtraWindow, GhostWindowBuilder, TextAnimation};
+use ghost_ui::{Callout, CalloutStyle, ExtraWindow, GhostApp, GhostEvent, GhostWindowBuilder, GpuResources, TextAnimation};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 use tao::event::WindowEvent;
 use tao::window::WindowId;
-use wgpu::{Device, Queue, RenderPass, TextureFormat};
+use wgpu::RenderPass;
 
 use crate::bus::AppBus;
 use crate::config::{Anchor, Config};
@@ -51,6 +51,7 @@ impl CalloutWindow {
                 callout: ui_design(config),
                 receiver: bus.callout_rx.take().expect("callout_rx already consumed"),
                 initialized: false,
+                needs_redraw: false,
             },
         }
     }
@@ -62,9 +63,8 @@ impl ExtraWindow for CalloutWindow {
     fn on_event(&mut self, _event: &WindowEvent) {}
 
     fn update(&mut self, delta: f32) {
-        if self.logic.update(delta) {
-            self.window.request_redraw();
-        }
+        self.logic.update(delta);
+        if self.logic.needs_redraw() { self.window.request_redraw(); }
     }
 
     fn render(&mut self) {
@@ -76,7 +76,7 @@ impl ExtraWindow for CalloutWindow {
         let size = self.window.window().inner_size();
         let viewport = [size.width as f32, size.height as f32];
         self.window.prepare_callout(&mut self.logic, viewport);
-        let _ = self.window.render_callout(&self.logic);
+        let _ = self.window.render_with_widgets_and_app(None, &mut self.logic);
     }
 
     fn request_redraw(&self) {
@@ -94,50 +94,58 @@ impl ExtraWindow for CalloutWindow {
     fn bring_to_front(&self) {}
 }
 
-/// Rendering logic, separate from the window so GhostWindow methods can borrow
-/// both halves independently (field splitting).
 struct CalloutLogic {
     callout: Callout,
     receiver: Receiver<CalloutCommand>,
     initialized: bool,
+    needs_redraw: bool,
 }
 
-impl CalloutApp for CalloutLogic {
-    fn init_gpu(&mut self, device: &Device, queue: &Queue, format: TextureFormat) {
+impl GhostApp for CalloutLogic {
+    fn on_event(&mut self, _: GhostEvent) {}
+
+    fn init_gpu(&mut self, gpu: GpuResources<'_>) {
         if !self.initialized {
-            self.callout.init(device, queue, format);
+            self.callout.init(gpu.device, gpu.queue, gpu.format);
             self.initialized = true;
             log::info!("Callout GPU initialized");
         }
     }
 
-    fn prepare(&mut self, device: &Device, queue: &Queue, viewport: [f32; 2], scale_factor: f32, _opacity: f32) {
+    fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, viewport: [f32; 2], scale_factor: f32, _opacity: f32) {
         if self.callout.is_visible() {
             self.callout.prepare(device, queue, viewport, scale_factor);
         }
     }
 
-    fn render<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
-        if self.callout.is_visible() {
-            self.callout.render(render_pass);
-        }
-    }
-
-    fn update(&mut self, delta: f32) -> bool {
+    fn update(&mut self, delta: f32) {
         let mut had_commands = false;
         while let Ok(cmd) = self.receiver.try_recv() {
             had_commands = true;
             match cmd {
-                CalloutCommand::Say(text) => self.callout.say(text),
-                CalloutCommand::Think(text) => self.callout.think(text),
+                CalloutCommand::Say(text)    => self.callout.say(text),
+                CalloutCommand::Think(text)  => self.callout.think(text),
                 CalloutCommand::Scream(text) => self.callout.scream(text),
-                CalloutCommand::Hide => self.callout.hide(),
+                CalloutCommand::Hide         => self.callout.hide(),
             }
         }
         let was_visible = self.callout.is_visible();
         self.callout.update(delta);
         let is_visible = self.callout.is_visible();
-        had_commands || (was_visible != is_visible) || (is_visible && self.callout.is_animating())
+        self.needs_redraw = had_commands
+            || (was_visible != is_visible)
+            || (is_visible && self.callout.is_animating());
+    }
+
+    fn needs_redraw(&self) -> bool { self.needs_redraw }
+
+    fn render_self<'rp>(&mut self, render_pass: &mut RenderPass<'rp>) where Self: 'rp {
+        if self.callout.is_visible() {
+            // Safety: Self: 'rp guarantees callout's GPU resources are valid for 'rp.
+            // We extend the anonymous borrow lifetime to 'rp to satisfy Callout::render's constraint.
+            let callout: &'rp Callout = unsafe { &*(&self.callout as *const Callout) };
+            callout.render(render_pass);
+        }
     }
 }
 
@@ -151,10 +159,10 @@ fn ui_design(config: &Config) -> Callout {
         ..Default::default()
     };
     let animation = match config.callout.animation.as_str() {
-        "instant" => TextAnimation::Instant,
-        "word-by-word" | "wordbyword" => TextAnimation::WordByWord { wps: config.callout.animation_speed },
-        "stream" => TextAnimation::Stream { cps: config.callout.animation_speed },
-        _ => TextAnimation::Typewriter { cps: config.callout.animation_speed },
+        "instant"                       => TextAnimation::Instant,
+        "word-by-word" | "wordbyword"   => TextAnimation::WordByWord { wps: config.callout.animation_speed },
+        "stream"                        => TextAnimation::Stream { cps: config.callout.animation_speed },
+        _                               => TextAnimation::Typewriter { cps: config.callout.animation_speed },
     };
     let mut callout = Callout::new()
         .with_position(0.0, 0.0)

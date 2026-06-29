@@ -272,16 +272,6 @@ impl ChatWindow {
         }
     }
 
-    /// Get the window ID for event routing
-    pub fn window_id(&self) -> WindowId {
-        self.window.id()
-    }
-
-    /// Check if the window is visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
     /// Show the window
     pub fn show(&mut self) {
         self.visible = true;
@@ -311,35 +301,7 @@ impl ChatWindow {
         self.needs_repaint = true;
     }
 
-    /// Set the window position (in physical pixels)
-    pub fn set_position(&self, x: i32, y: i32) {
-        self.window
-            .set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
-    }
-
-    /// Bring window to front (without stealing focus)
-    pub fn bring_to_front(&self) {
-        if self.visible {
-            #[cfg(target_os = "macos")]
-            {
-                use tao::platform::macos::WindowExtMacOS;
-                // Get the NSWindow and call orderFront to bring to front without stealing focus
-                let ns_window = self.window.ns_window();
-                unsafe {
-                    use objc::{msg_send, sel, sel_impl};
-                    let _: () = msg_send![ns_window as cocoa::base::id, orderFront: cocoa::base::nil];
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                // On other platforms, set focus
-                self.window.set_focus();
-            }
-        }
-    }
-
-    /// Process incoming commands and update snap/visibility state
-    pub fn update_state(&mut self, _delta: f32) {
+    fn update_state(&mut self, _delta: f32) {
         // 1. Process channel commands
         while let Ok(cmd) = self.receiver.try_recv() {
             match cmd {
@@ -481,8 +443,7 @@ impl ChatWindow {
         }
     }
 
-    /// Handle window events (with snap/unsnap detection)
-    pub fn on_event(&mut self, event: &WindowEvent) {
+    fn on_window_event(&mut self, event: &WindowEvent) {
         // Track resize to suppress false unsnap from OS-generated Moved events
         if let WindowEvent::Resized(_) = event {
             self.state.set_chat_just_resized(true);
@@ -652,20 +613,12 @@ impl ChatWindow {
         }
     }
 
-    /// Request a redraw
-    pub fn request_redraw(&self) {
-        if self.visible {
-            self.window.request_redraw();
-        }
-    }
-
     /// Check if repaint is needed
     pub fn needs_repaint(&self) -> bool {
         self.needs_repaint && self.visible
     }
 
-    /// Render the chat window
-    pub fn render(&mut self) {
+    fn do_render(&mut self) {
         if !self.visible {
             return;
         }
@@ -1118,35 +1071,26 @@ fn parse_voice_status(s: &str) -> (&str, f32) {
 
 /// Implement ExtraWindow trait for integration with ghost-ui event loop
 impl ExtraWindow for ChatWindow {
-    fn window_id(&self) -> WindowId {
-        self.window.id()
-    }
-
-    fn on_event(&mut self, event: &WindowEvent) {
-        ChatWindow::on_event(self, event);
-    }
-
-    fn update(&mut self, delta: f32) {
-        self.update_state(delta);
-    }
-
-    fn render(&mut self) {
-        ChatWindow::render(self);
-    }
-
-    fn request_redraw(&self) {
-        ChatWindow::request_redraw(self);
-    }
-
-    fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    fn set_position(&self, x: i32, y: i32) {
-        ChatWindow::set_position(self, x, y);
-    }
-
+    fn window_id(&self) -> WindowId { self.window.id() }
+    fn is_visible(&self) -> bool { self.visible }
+    fn on_event(&mut self, event: &WindowEvent) { self.on_window_event(event); }
+    fn update(&mut self, delta: f32) { self.update_state(delta); }
+    fn render(&mut self) { self.do_render(); }
+    fn request_redraw(&self) { if self.visible { self.window.request_redraw(); } }
+    fn set_position(&self, x: i32, y: i32) { self.window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y)); }
     fn bring_to_front(&self) {
-        ChatWindow::bring_to_front(self);
+        if self.visible {
+            #[cfg(target_os = "macos")]
+            {
+                use tao::platform::macos::WindowExtMacOS;
+                let ns_window = self.window.ns_window();
+                unsafe {
+                    use objc::{msg_send, sel, sel_impl};
+                    let _: () = msg_send![ns_window as cocoa::base::id, orderFront: cocoa::base::nil];
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            self.window.set_focus();
+        }
     }
 }

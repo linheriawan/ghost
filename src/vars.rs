@@ -12,8 +12,7 @@ pub struct Rect {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WinState {
-    Focused,
-    Behind,
+    Focused, Behind,
     NotRunning,
 }
 

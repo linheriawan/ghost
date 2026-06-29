@@ -14,6 +14,14 @@ pub use button_image::ButtonImage;
 pub use label::{Label, LabelId, LabelStyle, FontStyle};
 pub use marquee_label::MarqueeLabel;
 
+/// Holds any widget variant; used as the element type of a window's widget list.
+pub enum AnyWidget {
+    Button(Button),
+    ButtonImage(ButtonImage),
+    Label(Label),
+    Marquee(MarqueeLabel),
+}
+
 /// Coordinate origin for widget positioning
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Origin {

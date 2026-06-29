@@ -1,9 +1,11 @@
 //! Ghost window creation and event handling
 
 mod config;
+mod follower;
 mod platform;
 
 pub use config::{WindowConfig, CalloutWindowConfig};
+pub use follower::GhostFollower;
 use config::{clamp_to_max_size, MAX_TEXTURE_SIZE};
 
 use std::path::Path;
@@ -223,14 +225,7 @@ impl GhostWindow {
         }
     }
 
-    /// Render a callout window (transparent, no skin)
-    pub fn render_callout<C: CalloutApp>(&mut self, app: &C) -> Result<(), wgpu::SurfaceError> {
-        if let Some(ref mut renderer) = self.renderer {
-            renderer.render_callout(app)
-        } else {
-            Ok(())
-        }
-    }
+
 
     /// Get the current cursor position (in screen coordinates)
     pub fn cursor_position(&self) -> Option<PhysicalPosition<f64>> {
@@ -473,15 +468,21 @@ impl GhostWindow {
         }
     }
 
-    /// Initialize a CalloutApp's GPU resources.
-    pub fn init_callout_gpu<C: CalloutApp>(&mut self, app: &mut C) {
+    /// Initialize a GhostApp's GPU resources (format-only path, no widget renderer).
+    /// Use for apps that only need init_gpu (e.g. callout logic with no buttons/labels).
+    pub fn init_callout_gpu<A: GhostApp>(&mut self, app: &mut A) {
         if let Some(ref renderer) = self.renderer {
-            app.init_gpu(renderer.device(), renderer.queue(), renderer.format());
+            app.init_gpu(GpuResources {
+                device: renderer.device(),
+                queue: renderer.queue(),
+                format: renderer.format(),
+            });
         }
     }
 
-    /// Prepare a CalloutApp for the current frame (always full opacity).
-    pub fn prepare_callout<C: CalloutApp>(&self, app: &mut C, viewport: [f32; 2]) {
+    /// Prepare a GhostApp for the current frame at full opacity.
+    /// Used by callout-style windows that are always fully opaque.
+    pub fn prepare_callout<A: GhostApp>(&self, app: &mut A, viewport: [f32; 2]) {
         if let Some(ref renderer) = self.renderer {
             let sf = self.data.window.scale_factor() as f32;
             app.prepare(renderer.device(), renderer.queue(), viewport, sf, 1.0);
@@ -527,26 +528,57 @@ pub trait GhostApp {
     /// Called when an event occurs
     fn on_event(&mut self, event: GhostEvent);
 
-    /// Called before rendering, return buttons to render
-    fn buttons(&self) -> Vec<&crate::elements::Button> { Vec::new() }
+    /// Return the flat widget list. Override this (and `widgets_mut`) to provide widgets;
+    /// all individual accessor methods are derived from these two by default.
+    fn widget_list(&self) -> &[crate::elements::AnyWidget] { &[] }
 
-    /// Called to update button states (for hover effects, etc.)
-    fn buttons_mut(&mut self) -> Vec<&mut crate::elements::Button> { Vec::new() }
+    /// Return a mutable reference to the widget vec for in-place mutation.
+    fn widgets_mut(&mut self) -> Option<&mut Vec<crate::elements::AnyWidget>> { None }
 
-    /// Return image buttons to render
-    fn button_images(&self) -> Vec<&crate::elements::ButtonImage> { Vec::new() }
-
-    /// Return mutable image buttons (for hover/press state updates)
-    fn button_images_mut(&mut self) -> Vec<&mut crate::elements::ButtonImage> { Vec::new() }
-
-    /// Return labels to render
-    fn labels(&self) -> Vec<&crate::elements::Label> { Vec::new() }
-
-    /// Return marquee labels to render
-    fn marquee_labels(&self) -> Vec<&crate::elements::MarqueeLabel> { Vec::new() }
-
-    /// Return mutable marquee labels (for scroll animation updates)
-    fn marquee_labels_mut(&mut self) -> Vec<&mut crate::elements::MarqueeLabel> { Vec::new() }
+    fn buttons(&self) -> Vec<&crate::elements::Button> {
+        self.widget_list().iter()
+            .filter_map(|w| if let crate::elements::AnyWidget::Button(b) = w { Some(b) } else { None })
+            .collect()
+    }
+    fn buttons_mut(&mut self) -> Vec<&mut crate::elements::Button> {
+        match self.widgets_mut() {
+            Some(list) => list.iter_mut()
+                .filter_map(|w| if let crate::elements::AnyWidget::Button(b) = w { Some(b) } else { None })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+    fn button_images(&self) -> Vec<&crate::elements::ButtonImage> {
+        self.widget_list().iter()
+            .filter_map(|w| if let crate::elements::AnyWidget::ButtonImage(b) = w { Some(b) } else { None })
+            .collect()
+    }
+    fn button_images_mut(&mut self) -> Vec<&mut crate::elements::ButtonImage> {
+        match self.widgets_mut() {
+            Some(list) => list.iter_mut()
+                .filter_map(|w| if let crate::elements::AnyWidget::ButtonImage(b) = w { Some(b) } else { None })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+    fn labels(&self) -> Vec<&crate::elements::Label> {
+        self.widget_list().iter()
+            .filter_map(|w| if let crate::elements::AnyWidget::Label(l) = w { Some(l) } else { None })
+            .collect()
+    }
+    fn marquee_labels(&self) -> Vec<&crate::elements::MarqueeLabel> {
+        self.widget_list().iter()
+            .filter_map(|w| if let crate::elements::AnyWidget::Marquee(m) = w { Some(m) } else { None })
+            .collect()
+    }
+    fn marquee_labels_mut(&mut self) -> Vec<&mut crate::elements::MarqueeLabel> {
+        match self.widgets_mut() {
+            Some(list) => list.iter_mut()
+                .filter_map(|w| if let crate::elements::AnyWidget::Marquee(m) = w { Some(m) } else { None })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
 
     /// Return the current skin to render (for animated skins)
     /// If None, the window's static skin will be used
@@ -570,31 +602,34 @@ pub trait GhostApp {
     /// included in click-through decisions.
     fn hit_test(&self, _x: f32, _y: f32) -> bool { false }
 
-    /// Called during rendering to render layers and text overlays
-    /// This is called after the main skin is rendered but before buttons
-    fn render_layers<'a>(
-        &'a mut self,
+    /// Called after `update()` by GhostFollower.
+    /// Return `Some(true)` to show the window, `Some(false)` to hide it.
+    /// The app signals visibility changes from within its command polling in `update()`.
+    fn take_visibility(&mut self) -> Option<bool> { None }
+
+    /// Called by GhostFollower when the window visibility actually changes.
+    /// Override to track state needed for toggle logic.
+    fn on_visible_changed(&mut self, _visible: bool) {}
+
+    /// Returns true if the app needs a redraw this frame (e.g. an animation is running).
+    /// Called after `update()` by GhostFollower and the main runner.
+    fn needs_redraw(&self) -> bool { false }
+
+    /// Called during rendering after skin, layers, and widgets.
+    /// Use for custom GPU draw calls (e.g. callout bubbles) that were prepared in `prepare()`.
+    fn render_self<'rp>(&mut self, _render_pass: &mut wgpu::RenderPass<'rp>) where Self: 'rp {}
+
+    /// Called during rendering to render layers and text overlays.
+    /// Called after skin but before widgets and render_self.
+    fn render_layers<'rp>(
+        &mut self,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _viewport: [f32; 2],
-        _render_pass: &mut wgpu::RenderPass<'a>,
-    ) {}
+        _render_pass: &mut wgpu::RenderPass<'rp>,
+    ) where Self: 'rp {}
 }
 
-/// Application trait for callout rendering
-pub trait CalloutApp {
-    /// Called once when GPU resources are available
-    fn init_gpu(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _format: wgpu::TextureFormat) {}
-
-    /// Called before rendering to prepare GPU resources
-    fn prepare(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, _viewport: [f32; 2], _scale_factor: f32, _opacity: f32) {}
-
-    /// Called during rendering
-    fn render<'a>(&'a self, _render_pass: &mut wgpu::RenderPass<'a>) {}
-
-    /// Called on update (for animations). Returns true if redraw is needed.
-    fn update(&mut self, _delta: f32) -> bool { false }
-}
 
 /// Trait for extra windows that can be managed by the event loop
 pub trait ExtraWindow {
